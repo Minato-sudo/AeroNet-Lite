@@ -152,12 +152,17 @@ def main():
                         old_path = list(path)
                         
                         # Animate Part 1: Takeoff to Disruption
-                        for i in range(disruption_idx):
-                            status_text.info(f"🚁 Drone in flight... Currently at {path[i]}")
-                            fig = draw_grid(grid, path=path, drone_pos=path[i])
-                            plot_placeholder.pyplot(fig)
-                            plt.close(fig)
-                            time.sleep(0.4) # Animation speed
+                        for i in range(disruption_idx - 1):
+                            r1, c1 = path[i]
+                            r2, c2 = path[i+1]
+                            for step in range(4):
+                                interp_r = r1 + (r2 - r1) * (step / 4.0)
+                                interp_c = c1 + (c2 - c1) * (step / 4.0)
+                                status_text.info(f"🚁 Drone in flight... Heading to ({r2}, {c2})")
+                                fig = draw_grid(grid, path=path, drone_pos=(interp_r, interp_c))
+                                plot_placeholder.pyplot(fig)
+                                plt.close(fig)
+                                time.sleep(0.05)
                             
                         # Trigger Disruption
                         status_text.warning(f"💥 ALERT: Severe Weather activated at {disruption_cell}! Drone executing emergency A* replanning...")
@@ -172,12 +177,22 @@ def main():
                             path = path[:disruption_idx] + new_path[1:]
                             
                             # Animate Part 2: Detour to Goal
-                            for i in range(disruption_idx - 1, len(path)):
-                                status_text.success(f"✅ Rerouting successful! Navigating to goal... Currently at {path[i]}")
-                                fig = draw_grid(grid, path=path, old_path=old_path, disruption=disruption_cell, drone_pos=path[i])
-                                plot_placeholder.pyplot(fig)
-                                plt.close(fig)
-                                time.sleep(0.4)
+                            for i in range(disruption_idx - 1, len(path)-1):
+                                r1, c1 = path[i]
+                                r2, c2 = path[i+1]
+                                for step in range(4):
+                                    interp_r = r1 + (r2 - r1) * (step / 4.0)
+                                    interp_c = c1 + (c2 - c1) * (step / 4.0)
+                                    status_text.success(f"✅ Rerouting successful! Navigating to ({r2}, {c2})")
+                                    fig = draw_grid(grid, path=path, old_path=old_path, disruption=disruption_cell, drone_pos=(interp_r, interp_c))
+                                    plot_placeholder.pyplot(fig)
+                                    plt.close(fig)
+                                    time.sleep(0.05)
+                            
+                            # Draw final position
+                            fig = draw_grid(grid, path=path, old_path=old_path, disruption=disruption_cell, drone_pos=path[-1])
+                            plot_placeholder.pyplot(fig)
+                            plt.close(fig)
                             status_text.success(f"🎉 Delivery Complete! Total Manhattan Cost: {len(path)-1} moves.")
                         else:
                             status_text.error("Rerouting failed: Drone trapped! Initiating emergency landing.")
@@ -187,12 +202,22 @@ def main():
                             
                 elif path:
                     # Normal Animation
-                    for i in range(len(path)):
-                        status_text.info(f"🚁 Drone in flight... Currently at {path[i]}")
-                        fig = draw_grid(grid, path=path, drone_pos=path[i])
-                        plot_placeholder.pyplot(fig)
-                        plt.close(fig)
-                        time.sleep(0.3)
+                    for i in range(len(path)-1):
+                        r1, c1 = path[i]
+                        r2, c2 = path[i+1]
+                        for step in range(4): # 4 frames between cells for smoothness
+                            interp_r = r1 + (r2 - r1) * (step / 4.0)
+                            interp_c = c1 + (c2 - c1) * (step / 4.0)
+                            status_text.info(f"🚁 Drone in flight... Heading to ({r2}, {c2})")
+                            fig = draw_grid(grid, path=path, drone_pos=(interp_r, interp_c))
+                            plot_placeholder.pyplot(fig)
+                            plt.close(fig)
+                            time.sleep(0.05)
+                    
+                    # Draw final position
+                    fig = draw_grid(grid, path=path, drone_pos=path[-1])
+                    plot_placeholder.pyplot(fig)
+                    plt.close(fig)
                     status_text.success(f"🎉 Delivery Complete! Total Manhattan Cost: {cost} moves.")
                 else:
                     status_text.error(f"Routing failed before takeoff: {msg}")
