@@ -34,11 +34,13 @@ class FleetSelector:
 
     def generate_population(self, pop_size=20):
         """Creates an initial random population of fleets."""
-        pop = []
-        for _ in range(pop_size):
+        pop = [[0, 0]] # Always guarantee at least one perfectly valid base solution
+        for _ in range(pop_size - 1):
             # Randomly guess number of drones based on max possible within budget
-            l = random.randint(0, 10)
-            h = random.randint(0, 4)
+            max_l = max(1, self.budget // self.drones['Light'][0])
+            max_h = max(1, self.budget // self.drones['Heavy'][0])
+            l = random.randint(0, max_l)
+            h = random.randint(0, max_h)
             pop.append([l, h])
         return pop
 
