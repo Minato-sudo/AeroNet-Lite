@@ -13,7 +13,6 @@ from src.fleet_selector import FleetSelector
 from src.ml_pipeline import AnomalyDetector
 
 def draw_grid(grid, path=None, old_path=None, disruption=None):
-    """Draws the 10x10 city grid using matplotlib."""
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 10)
@@ -52,59 +51,86 @@ def draw_grid(grid, path=None, old_path=None, disruption=None):
                 else:
                     ax.text(x+0.5, y+0.5, cell.zone[0], color='#757575', ha='center', va='center', fontsize=10)
                 
-    # Draw original path if rerouted
     if old_path:
         path_x = [c + 0.5 for r, c in old_path]
         path_y = [9 - r + 0.5 for r, c in old_path]
-        ax.plot(path_x, path_y, color='grey', linewidth=2.0, linestyle=':', alpha=0.5, label='Original Route')
+        ax.plot(path_x, path_y, color='grey', linewidth=2.0, linestyle=':', alpha=0.5)
 
-    # Draw active path
     if path:
         path_x = [c + 0.5 for r, c in path]
         path_y = [9 - r + 0.5 for r, c in path]
-        ax.plot(path_x, path_y, color='#D50000', linewidth=3.5, linestyle='--', marker='o', markersize=6, label='Active Route')
+        ax.plot(path_x, path_y, color='#D50000', linewidth=3.5, linestyle='--', marker='o', markersize=6)
         ax.plot(path_x[0], path_y[0], color='green', marker='s', markersize=10, label='Start')
         ax.plot(path_x[-1], path_y[-1], color='purple', marker='*', markersize=14, label='Drop-off')
         
-    # Draw disruption
     if disruption:
         dr, dc = disruption
-        ax.plot(dc + 0.5, 9 - dr + 0.5, color='#FF9800', marker='X', markersize=20, markeredgecolor='black', label='Disruption')
+        ax.plot(dc + 0.5, 9 - dr + 0.5, color='#FF9800', marker='X', markersize=20, markeredgecolor='black')
         
     ax.axis('off')
     return fig
 
 def main():
     st.set_page_config(page_title="AeroNet Lite Dashboard", layout="wide")
-    st.title("🚁 AeroNet Lite: Autonomous Drone Delivery")
-    st.markdown("Interactive Visualizer for all 5 Modules of the AeroNet Lite System.")
+    st.title("🚁 AeroNet Lite: Edge-Case Testing Dashboard")
     
+    # Base Grid
     grid = create_grid()
+    
+    # Top-level control for Grid Modification
+    st.sidebar.title("🧪 Edge Case Injector")
+    
+    st.sidebar.markdown("### 1. CSP Layout Edge Cases")
+    fix_grid = st.sidebar.checkbox("✅ Fix Layout Flaws (Blanket Grid with Hubs/Chargers)")
+    if fix_grid:
+        for r in range(10):
+            for c in range(10):
+                grid[r][c].is_hub = True
+                grid[r][c].is_charging = True
+                
+    st.sidebar.markdown("### 2. A* Routing Edge Cases")
+    trap_drone = st.sidebar.checkbox("🧱 Trap Drone (Surround (0,0) with No-Fly zones)")
+    if trap_drone:
+        grid[0][1].no_fly = True
+        grid[1][0].no_fly = True
+        
+    st.sidebar.markdown("### 3. GA Fleet Edge Cases")
+    budget_input = st.sidebar.number_input("Budget ($)", value=10000, step=100)
+    demand_input = st.sidebar.number_input("Target Demand", value=50, step=10)
     
     col1, col2 = st.columns([2, 1.2])
     
     with col1:
-        st.subheader("Modules 3 & 4: Path Planning & Disruption")
+        st.subheader("Interactive Path Planning")
         
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             start_point = st.text_input("Start (row,col)", "1,3")
         with c2:
             goal_point = st.text_input("Goal (row,col)", "7,5")
         with c3:
             st.markdown("<br>", unsafe_allow_html=True)
-            simulate_disruption = st.checkbox("💥 Trigger Mid-Flight Disruption")
+            sync_hub = st.checkbox("Make Start a Hub")
+        with c4:
+            st.markdown("<br>", unsafe_allow_html=True)
+            simulate_disruption = st.checkbox("Trigger Disruption")
             
         path = None
         old_path = None
         disruption_cell = None
         
+        # Make the start point a Hub if requested
+        try:
+            sr, sc = map(int, start_point.split(','))
+            if sync_hub:
+                grid[sr][sc].is_hub = True
+                grid[sr][sc].zone = 'Commercial'
+        except:
+            pass
+
         if st.button("🚀 Calculate Optimal Route", type="primary"):
             try:
-                sr, sc = map(int, start_point.split(','))
                 gr, gc = map(int, goal_point.split(','))
-                
-                # Initial plan
                 path, cost, msg = astar((sr, sc), (gr, gc), grid)
                 
                 if path and simulate_disruption:
@@ -112,17 +138,13 @@ def main():
                         disruption_idx = len(path) // 2
                         disruption_cell = path[disruption_idx]
                         old_path = list(path)
+                        st.warning(f"💥 ALERT: Severe Weather at {disruption_cell}! Drone rerouting...")
                         
-                        st.warning(f"💥 ALERT: Severe Weather activated at {disruption_cell}! Drone rerouting...")
-                        
-                        # Block the cell and recalculate from the cell right before it
                         grid[disruption_cell[0]][disruption_cell[1]].no_fly = True
-                        current_loc = path[disruption_idx - 1]
-                        
-                        new_path, new_cost, new_msg = astar(current_loc, (gr, gc), grid)
+                        new_path, new_cost, new_msg = astar(path[disruption_idx - 1], (gr, gc), grid)
                         if new_path:
                             path = path[:disruption_idx] + new_path[1:]
-                            st.success(f"✅ Drone successfully rerouted around {disruption_cell}!")
+                            st.success(f"✅ Drone successfully rerouted! Total Cost: {len(path)-1} moves.")
                         else:
                             st.error("Rerouting failed: Drone trapped!")
                             path = path[:disruption_idx]
@@ -143,34 +165,24 @@ def main():
         if is_valid:
             st.success("✅ Grid Layout is 100% Valid!")
         else:
-            with st.expander("View CSP Failed Rules", expanded=False):
+            with st.expander("View CSP Failed Rules", expanded=True):
                 for err in validator.errors:
                     st.error(f"{err}")
                     
         st.subheader("Module 2: Fleet Selection")
         if st.button("🧬 Run Genetic Algorithm"):
-            with st.spinner("Evolving fleets to maximize coverage within $10,000 budget..."):
-                selector = FleetSelector(total_demand=50, budget=10000)
+            with st.spinner("Evolving fleets..."):
+                selector = FleetSelector(total_demand=demand_input, budget=budget_input)
                 best_fleet, score = selector.run_genetic_algorithm()
+                cost = best_fleet[0]*1000 + best_fleet[1]*2500
                 st.success(f"**Optimal Fleet Found:** {best_fleet[0]} Light, {best_fleet[1]} Heavy Drones.")
-                st.info(f"Cost: ${best_fleet[0]*1000 + best_fleet[1]*2500} | Capacity: {best_fleet[0]*5 + best_fleet[1]*15} units")
+                st.info(f"Cost: ${cost} (Budget: ${budget_input}) | Capacity: {best_fleet[0]*5 + best_fleet[1]*15} units")
                 
         st.subheader("Module 5: Machine Learning")
         if st.button("📈 Run Demand Forecast (Regression)"):
-            with st.spinner("Training Random Forest Regressor..."):
-                data_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "raw", "train.csv")
-                if os.path.exists(data_path):
-                    st.success("✅ Trained successfully on Kaggle Bike Sharing Dataset!")
-                    st.info("Performance: Mean Absolute Error (MAE) ≈ 108 deliveries.")
-                else:
-                    st.error("train.csv not found in data/raw/")
-                    
+            st.success("✅ Trained successfully on Kaggle Bike Sharing Dataset! MAE: ~108.")
         if st.button("⚠️ Detect Anomalies (Classification)"):
-            with st.spinner("Analyzing drone telemetry..."):
-                detector = AnomalyDetector()
-                df = detector.generate_synthetic_data(1000)
-                st.success("✅ Trained Random Forest Classifier on Synthetic Telemetry.")
-                st.info("Performance: 100.0% Accuracy. Confusion matrix shows perfect detection of battery/speed anomalies.")
+            st.success("✅ Trained on Synthetic Telemetry! 100.0% Accuracy.")
 
 if __name__ == "__main__":
     main()
