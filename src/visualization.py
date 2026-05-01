@@ -237,31 +237,32 @@ def main():
             except Exception as e:
                 st.error("Invalid coordinate format. Please use 'row,col'.")
                 
-        # SLIDER SCRUBBING UI
+        # Placeholders for dynamic sliding animation
+        status_text = st.empty()
+        plot_placeholder = st.empty()
+
         if 'frames' in st.session_state and st.session_state.frames:
             frames = st.session_state.frames
             
-            # The Timeline Slider
-            frame_idx = st.slider("⏱️ Scrub Flight Timeline (Drag to move drone)", 0, len(frames)-1, 0)
-            
-            # Get current frame data
-            frame = frames[frame_idx]
-            
-            # Print status message
-            if "ALERT" in frame['msg']:
-                st.warning(frame['msg'])
-            elif "Complete" in frame['msg']:
-                st.success(frame['msg'])
-            else:
-                st.info(frame['msg'])
+            # Auto-play animation (smooth sliding movement)
+            for frame in frames:
+                if "ALERT" in frame['msg']:
+                    status_text.warning(frame['msg'])
+                elif "Complete" in frame['msg']:
+                    status_text.success(frame['msg'])
+                else:
+                    status_text.info(frame['msg'])
+                    
+                fig = draw_grid(grid, path=frame['path'], old_path=frame['old_path'], disruption=frame['disruption'], drone_pos=frame['pos'])
+                plot_placeholder.pyplot(fig)
+                plt.close(fig)
+                time.sleep(0.03) # Very fast refresh to make it look like a smooth slide
                 
-            # Draw that specific frame
-            fig = draw_grid(grid, path=frame['path'], old_path=frame['old_path'], disruption=frame['disruption'], drone_pos=frame['pos'])
-            st.pyplot(fig)
+            # Clear the frames state so it doesn't replay when clicking other buttons
+            del st.session_state['frames']
         else:
             # Default state before calculation
-            fig = draw_grid(grid)
-            st.pyplot(fig)
+            plot_placeholder.pyplot(draw_grid(grid))
                     
     with col2:
         st.subheader("Module 1: Layout Validation (CSP)")
