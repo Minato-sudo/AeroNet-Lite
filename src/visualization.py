@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import sys
 import os
+import time
 
 # Add the project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -12,7 +13,8 @@ from src.astar_planner import astar
 from src.fleet_selector import FleetSelector
 from src.ml_pipeline import AnomalyDetector
 
-def draw_grid(grid, path=None, old_path=None, disruption=None):
+def draw_grid(grid, path=None, old_path=None, disruption=None, drone_pos=None):
+    """Draws the 10x10 city grid using matplotlib."""
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 10)
@@ -51,46 +53,52 @@ def draw_grid(grid, path=None, old_path=None, disruption=None):
                 else:
                     ax.text(x+0.5, y+0.5, cell.zone[0], color='#757575', ha='center', va='center', fontsize=10)
                 
+    # Draw original path if rerouted
     if old_path:
         path_x = [c + 0.5 for r, c in old_path]
         path_y = [9 - r + 0.5 for r, c in old_path]
         ax.plot(path_x, path_y, color='grey', linewidth=2.0, linestyle=':', alpha=0.5)
 
+    # Draw active path
     if path:
         path_x = [c + 0.5 for r, c in path]
         path_y = [9 - r + 0.5 for r, c in path]
         ax.plot(path_x, path_y, color='#D50000', linewidth=3.5, linestyle='--', marker='o', markersize=6)
-        ax.plot(path_x[0], path_y[0], color='green', marker='s', markersize=10, label='Start')
-        ax.plot(path_x[-1], path_y[-1], color='purple', marker='*', markersize=14, label='Drop-off')
         
+    # Draw disruption obstacle
     if disruption:
         dr, dc = disruption
-        ax.plot(dc + 0.5, 9 - dr + 0.5, color='#FF9800', marker='X', markersize=20, markeredgecolor='black')
+        ax.plot(dc + 0.5, 9 - dr + 0.5, color='#FF9800', marker='X', markersize=20, markeredgecolor='black', zorder=4)
+        
+    # Draw moving Drone
+    if drone_pos:
+        dr, dc = drone_pos
+        # Yellow circle for drone body
+        ax.plot(dc + 0.5, 9 - dr + 0.5, color='#FFEB3B', marker='o', markersize=22, markeredgecolor='black', zorder=5)
+        # Helicopter/Drone emoji
+        ax.text(dc + 0.5, 9 - dr + 0.5, '🚁', ha='center', va='center', fontsize=14, zorder=6)
         
     ax.axis('off')
     return fig
 
 def main():
     st.set_page_config(page_title="AeroNet Lite Dashboard", layout="wide")
-    st.title("🚁 AeroNet Lite: Edge-Case Testing Dashboard")
+    st.title("🚁 AeroNet Lite: Animated Drone Simulator")
     
     # Base Grid
     grid = create_grid()
     
-    # Top-level control for Grid Modification
     st.sidebar.title("🧪 Edge Case Injector")
     
     st.sidebar.markdown("### 1. CSP Layout Edge Cases")
-    fix_grid = st.sidebar.checkbox("✅ Fix Layout Flaws (Blanket Grid with Hubs/Chargers)")
-    if fix_grid:
+    if st.sidebar.checkbox("✅ Fix Layout Flaws (Blanket Grid with Hubs/Chargers)"):
         for r in range(10):
             for c in range(10):
                 grid[r][c].is_hub = True
                 grid[r][c].is_charging = True
                 
     st.sidebar.markdown("### 2. A* Routing Edge Cases")
-    trap_drone = st.sidebar.checkbox("🧱 Trap Drone (Surround (0,0) with No-Fly zones)")
-    if trap_drone:
+    if st.sidebar.checkbox("🧱 Trap Drone (Surround (0,0) with No-Fly zones)"):
         grid[0][1].no_fly = True
         grid[1][0].no_fly = True
         
@@ -101,7 +109,7 @@ def main():
     col1, col2 = st.columns([2, 1.2])
     
     with col1:
-        st.subheader("Interactive Path Planning")
+        st.subheader("Interactive Drone Flight Simulation")
         
         c1, c2, c3, c4 = st.columns(4)
         with c1:
@@ -115,11 +123,11 @@ def main():
             st.markdown("<br>", unsafe_allow_html=True)
             simulate_disruption = st.checkbox("Trigger Disruption")
             
-        path = None
-        old_path = None
-        disruption_cell = None
+        # Placeholders for dynamic animation
+        status_text = st.empty()
+        plot_placeholder = st.empty()
         
-        # Make the start point a Hub if requested
+        # Apply Hub sync before routing
         try:
             sr, sc = map(int, start_point.split(','))
             if sync_hub:
@@ -128,7 +136,11 @@ def main():
         except:
             pass
 
-        if st.button("🚀 Calculate Optimal Route", type="primary"):
+        # Draw default grid before animation
+        if not st.session_state.get('animating', False):
+            plot_placeholder.pyplot(draw_grid(grid))
+
+        if st.button("🚀 Launch Drone Mission", type="primary"):
             try:
                 gr, gc = map(int, goal_point.split(','))
                 path, cost, msg = astar((sr, sc), (gr, gc), grid)
@@ -138,26 +150,56 @@ def main():
                         disruption_idx = len(path) // 2
                         disruption_cell = path[disruption_idx]
                         old_path = list(path)
-                        st.warning(f"💥 ALERT: Severe Weather at {disruption_cell}! Drone rerouting...")
                         
+                        # Animate Part 1: Takeoff to Disruption
+                        for i in range(disruption_idx):
+                            status_text.info(f"🚁 Drone in flight... Currently at {path[i]}")
+                            fig = draw_grid(grid, path=path, drone_pos=path[i])
+                            plot_placeholder.pyplot(fig)
+                            plt.close(fig)
+                            time.sleep(0.4) # Animation speed
+                            
+                        # Trigger Disruption
+                        status_text.warning(f"💥 ALERT: Severe Weather activated at {disruption_cell}! Drone executing emergency A* replanning...")
                         grid[disruption_cell[0]][disruption_cell[1]].no_fly = True
-                        new_path, new_cost, new_msg = astar(path[disruption_idx - 1], (gr, gc), grid)
+                        current_loc = path[disruption_idx - 1]
+                        
+                        time.sleep(1.0) # Pause for dramatic effect
+                        
+                        # Recalculate
+                        new_path, new_cost, new_msg = astar(current_loc, (gr, gc), grid)
                         if new_path:
                             path = path[:disruption_idx] + new_path[1:]
-                            st.success(f"✅ Drone successfully rerouted! Total Cost: {len(path)-1} moves.")
+                            
+                            # Animate Part 2: Detour to Goal
+                            for i in range(disruption_idx - 1, len(path)):
+                                status_text.success(f"✅ Rerouting successful! Navigating to goal... Currently at {path[i]}")
+                                fig = draw_grid(grid, path=path, old_path=old_path, disruption=disruption_cell, drone_pos=path[i])
+                                plot_placeholder.pyplot(fig)
+                                plt.close(fig)
+                                time.sleep(0.4)
+                            status_text.success(f"🎉 Delivery Complete! Total Manhattan Cost: {len(path)-1} moves.")
                         else:
-                            st.error("Rerouting failed: Drone trapped!")
-                            path = path[:disruption_idx]
+                            status_text.error("Rerouting failed: Drone trapped! Initiating emergency landing.")
+                            fig = draw_grid(grid, path=path[:disruption_idx], old_path=old_path, disruption=disruption_cell, drone_pos=current_loc)
+                            plot_placeholder.pyplot(fig)
+                            plt.close(fig)
+                            
                 elif path:
-                    st.success(f"Route found! Total Manhattan Cost: {cost} moves.")
+                    # Normal Animation
+                    for i in range(len(path)):
+                        status_text.info(f"🚁 Drone in flight... Currently at {path[i]}")
+                        fig = draw_grid(grid, path=path, drone_pos=path[i])
+                        plot_placeholder.pyplot(fig)
+                        plt.close(fig)
+                        time.sleep(0.3)
+                    status_text.success(f"🎉 Delivery Complete! Total Manhattan Cost: {cost} moves.")
                 else:
-                    st.error(f"Routing failed: {msg}")
+                    status_text.error(f"Routing failed before takeoff: {msg}")
+                    
             except Exception as e:
-                st.error("Invalid format. Please use 'row,col'.")
+                st.error("Invalid coordinate format. Please use 'row,col' (e.g. 1,3).")
                 
-        fig = draw_grid(grid, path=path, old_path=old_path, disruption=disruption_cell)
-        st.pyplot(fig)
-        
     with col2:
         st.subheader("Module 1: Layout Validation (CSP)")
         validator = LayoutValidator(grid)
