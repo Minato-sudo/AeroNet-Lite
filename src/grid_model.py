@@ -5,76 +5,97 @@ from typing import List
 class Cell:
     row: int
     col: int
-    zone_type: str  # 'Residential', 'Industrial', 'Hub', 'Hospital', 'Open Field'
-    population_density: str  # 'Low', 'Medium', 'High'
+    zone: str  # 'Residential', 'Commercial', 'Industrial', 'School', 'Hospital', 'Open Field'
+    density: int  # Numeric value, e.g., 5000
+    is_hub: bool = False
+    is_charging: bool = False
+    is_medical_pickup: bool = False
     no_fly: bool = False
+    demand: float = 0.0  # Estimated delivery demand
 
 def create_grid() -> List[List[Cell]]:
     """
-    Creates a 10x10 grid for the drone delivery simulation.
-    Initializes specific zones: 2 hubs, 1 hospital, 3 residential zones, 1 industrial cell.
+    Creates a 10x10 grid matching the exact layout from the 
+    'Sample 10x10 Region Grid' specification.
     """
-    # Initialize a 10x10 grid with Open Field and Low density
-    grid = [[Cell(row=r, col=c, zone_type='Open Field', population_density='Low') for c in range(10)] for r in range(10)]
+    # Initialize a 10x10 grid with Open Field
+    grid = [[Cell(row=r, col=c, zone='Open Field', density=1000) for c in range(10)] for r in range(10)]
     
-    # Set 2 Hubs
-    grid[1][1].zone_type = 'Hub'
-    grid[8][8].zone_type = 'Hub'
+    # The exact layout from the image:
+    # R=Residential, C=Commercial, O=Open Field, S=School, I=Industrial, H=Hospital
+    # Hub=Hub, CHG=Charging, NF=No-fly
+    layout = [
+        ['R', 'R', 'C', 'C',   'O',   'O', 'S',  'S', 'O', 'O'],
+        ['R', 'R', 'C', 'Hub', 'O',   'O', 'S',  'O', 'O', 'O'],
+        ['R', 'C', 'C', 'O',   'CHG', 'O', 'O',  'O', 'I', 'I'],
+        ['O', 'O', 'O', 'O',   'O',   'O', 'NF', 'O', 'I', 'I'],
+        ['H', 'H', 'O', 'R',   'R',   'C', 'C',  'O', 'O', 'O'],
+        ['H', 'O', 'O', 'R',   'R',   'C', 'Hub','C', 'O', 'O'],
+        ['O', 'CHG','O','O',   'R',   'R', 'C',  'C', 'O', 'S'],
+        ['O', 'O', 'O', 'O',   'O',   'R', 'R',  'O', 'O', 'S'],
+        ['I', 'I', 'O', 'C',   'C',   'O', 'O',  'O', 'O', 'O'],
+        ['I', 'I', 'O', 'C',   'C',   'O', 'O',  'H', 'H', 'O']
+    ]
     
-    # Set 1 Hospital
-    grid[5][5].zone_type = 'Hospital'
-    grid[5][5].population_density = 'High'
-    
-    # Set 1 Industrial Cell
-    grid[9][0].zone_type = 'Industrial'
-    
-    # Set 3 Residential Zones (blocks of cells)
-    # Zone 1
-    for r in range(2, 4):
-        for c in range(2, 4):
-            grid[r][c].zone_type = 'Residential'
-            grid[r][c].population_density = 'High'
+    for r in range(10):
+        for c in range(10):
+            char = layout[r][c]
             
-    # Zone 2
-    for r in range(7, 9):
-        for c in range(2, 4):
-            if grid[r][c].zone_type == 'Open Field':  # Don't overwrite hub at 8,8 if it was there (it's at 8,8 anyway)
-                grid[r][c].zone_type = 'Residential'
-                grid[r][c].population_density = 'Medium'
+            # Map the visual layout to the dataclass fields
+            if char == 'R':
+                grid[r][c].zone = 'Residential'
+                grid[r][c].density = 8000
+            elif char == 'C':
+                grid[r][c].zone = 'Commercial'
+                grid[r][c].density = 5000
+            elif char == 'I':
+                grid[r][c].zone = 'Industrial'
+                grid[r][c].density = 2000
+            elif char == 'S':
+                grid[r][c].zone = 'School'
+                grid[r][c].density = 4000
+            elif char == 'H':
+                grid[r][c].zone = 'Hospital'
+                grid[r][c].density = 3000
+                grid[r][c].is_medical_pickup = True
+            elif char == 'Hub':
+                grid[r][c].zone = 'Commercial' # Hubs are usually in Commercial/Open areas
+                grid[r][c].is_hub = True
+            elif char == 'CHG':
+                grid[r][c].zone = 'Open Field'
+                grid[r][c].is_charging = True
+            elif char == 'NF':
+                grid[r][c].zone = 'Open Field'
+                grid[r][c].no_fly = True
                 
-    # Zone 3
-    for r in range(2, 4):
-        for c in range(7, 9):
-            grid[r][c].zone_type = 'Residential'
-            grid[r][c].population_density = 'High'
-            
-    # Add a couple of initial No-Fly zones just as an example
-    grid[4][5].no_fly = True
-    grid[5][4].no_fly = True
-    
     return grid
 
 def print_grid(grid: List[List[Cell]]):
-    """Prints a simple text representation of the grid."""
+    """Prints a text representation of the grid matching the layout."""
     for row in grid:
         row_str = []
         for cell in row:
             if cell.no_fly:
-                row_str.append('X')
-            elif cell.zone_type == 'Hub':
-                row_str.append('H')
-            elif cell.zone_type == 'Hospital':
-                row_str.append('+')
-            elif cell.zone_type == 'Industrial':
-                row_str.append('I')
-            elif cell.zone_type == 'Residential':
-                row_str.append('R')
+                row_str.append('NF ')
+            elif cell.is_hub:
+                row_str.append('HUB')
+            elif cell.is_charging:
+                row_str.append('CHG')
+            elif cell.zone == 'Residential':
+                row_str.append('R  ')
+            elif cell.zone == 'Commercial':
+                row_str.append('C  ')
+            elif cell.zone == 'Industrial':
+                row_str.append('I  ')
+            elif cell.zone == 'School':
+                row_str.append('S  ')
+            elif cell.zone == 'Hospital':
+                row_str.append('H  ')
             else:
-                row_str.append('.')
+                row_str.append('O  ')
         print(' '.join(row_str))
 
 if __name__ == "__main__":
     my_grid = create_grid()
-    print("AeroNet Lite Grid Initialized:")
-    print("Legend: H=Hub, +=Hospital, I=Industrial, R=Residential, X=No-Fly, .=Open Field")
+    print("AeroNet Lite Grid Initialized (Sample Layout):")
     print_grid(my_grid)
