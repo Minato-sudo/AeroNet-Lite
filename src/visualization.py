@@ -13,6 +13,31 @@ from src.astar_planner import astar
 from src.fleet_selector import FleetSelector
 from src.ml_pipeline import AnomalyDetector
 
+def draw_drone(ax, dr, dc):
+    """Draws a detailed custom quadcopter drone instead of a simple box."""
+    y = 9 - dr + 0.5
+    x = dc + 0.5
+    
+    # Drone arms (X shape)
+    ax.plot([x-0.25, x+0.25], [y-0.25, y+0.25], color='#212121', linewidth=4, zorder=5)
+    ax.plot([x-0.25, x+0.25], [y+0.25, y-0.25], color='#212121', linewidth=4, zorder=5)
+    
+    # Rotors
+    rotor_offsets = [(-0.25, -0.25), (-0.25, 0.25), (0.25, -0.25), (0.25, 0.25)]
+    for rx, ry in rotor_offsets:
+        rotor = patches.Circle((x+rx, y+ry), 0.12, color='#424242', zorder=6) # Outer blade guard
+        ax.add_patch(rotor)
+        inner_rotor = patches.Circle((x+rx, y+ry), 0.05, color='#BDBDBD', zorder=7) # Spinning center
+        ax.add_patch(inner_rotor)
+        
+    # Central body (Bright yellow)
+    body = patches.Circle((x, y), 0.16, color='#FFC107', zorder=8)
+    ax.add_patch(body)
+    
+    # Blinking red navigation light in center
+    light = patches.Circle((x, y), 0.06, color='#F44336', zorder=9)
+    ax.add_patch(light)
+
 def draw_grid(grid, path=None, old_path=None, disruption=None, drone_pos=None):
     """Draws the 10x10 city grid using matplotlib."""
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -64,26 +89,95 @@ def draw_grid(grid, path=None, old_path=None, disruption=None, drone_pos=None):
         path_x = [c + 0.5 for r, c in path]
         path_y = [9 - r + 0.5 for r, c in path]
         ax.plot(path_x, path_y, color='#D50000', linewidth=3.5, linestyle='--', marker='o', markersize=6)
+        ax.plot(path_x[0], path_y[0], color='green', marker='s', markersize=10, zorder=3)
+        ax.plot(path_x[-1], path_y[-1], color='purple', marker='*', markersize=14, zorder=3)
         
     # Draw disruption obstacle
     if disruption:
         dr, dc = disruption
         ax.plot(dc + 0.5, 9 - dr + 0.5, color='#FF9800', marker='X', markersize=20, markeredgecolor='black', zorder=4)
         
-    # Draw moving Drone
+    # Draw custom Drone
     if drone_pos:
-        dr, dc = drone_pos
-        # Yellow circle for drone body
-        ax.plot(dc + 0.5, 9 - dr + 0.5, color='#FFEB3B', marker='o', markersize=22, markeredgecolor='black', zorder=5)
-        # Helicopter/Drone emoji
-        ax.text(dc + 0.5, 9 - dr + 0.5, '🚁', ha='center', va='center', fontsize=14, zorder=6)
+        draw_drone(ax, drone_pos[0], drone_pos[1])
         
     ax.axis('off')
     return fig
 
+def generate_frames(grid, start, goal, simulate_disruption):
+    """Pre-calculates all interpolated frames for smooth slider scrubbing."""
+    frames = []
+    path, cost, msg = astar(start, goal, grid)
+    
+    if not path:
+        return None, msg
+        
+    frames_per_cell = 10 # High framerate for smooth scrubbing
+        
+    if simulate_disruption and len(path) > 3:
+        disruption_idx = len(path) // 2
+        disruption_cell = path[disruption_idx]
+        old_path = list(path)
+        
+        # Path 1: Start to Disruption
+        for i in range(disruption_idx - 1):
+            r1, c1 = path[i]
+            r2, c2 = path[i+1]
+            for step in range(frames_per_cell):
+                r_pos = r1 + (r2 - r1) * (step / float(frames_per_cell))
+                c_pos = c1 + (c2 - c1) * (step / float(frames_per_cell))
+                frames.append({
+                    'pos': (r_pos, c_pos), 'path': path[:disruption_idx], 
+                    'old_path': None, 'disruption': None, 'msg': f"🚁 Flight initiated. Navigating to drop-off..."
+                })
+                
+        # Inject Disruption
+        grid[disruption_cell[0]][disruption_cell[1]].no_fly = True
+        current_loc = path[disruption_idx - 1]
+        new_path, new_cost, new_msg = astar(current_loc, goal, grid)
+        grid[disruption_cell[0]][disruption_cell[1]].no_fly = False # Revert for next run
+        
+        if new_path:
+            merged_path = path[:disruption_idx] + new_path[1:]
+            for i in range(disruption_idx - 1, len(merged_path) - 1):
+                r1, c1 = merged_path[i]
+                r2, c2 = merged_path[i+1]
+                for step in range(frames_per_cell):
+                    r_pos = r1 + (r2 - r1) * (step / float(frames_per_cell))
+                    c_pos = c1 + (c2 - c1) * (step / float(frames_per_cell))
+                    frames.append({
+                        'pos': (r_pos, c_pos), 'path': merged_path, 
+                        'old_path': old_path, 'disruption': disruption_cell, 
+                        'msg': f"💥 ALERT: Severe Weather at {disruption_cell}. A* Rerouting successful!"
+                    })
+            frames.append({
+                'pos': merged_path[-1], 'path': merged_path, 'old_path': old_path, 
+                'disruption': disruption_cell, 'msg': "🎉 Delivery Complete! (Rerouted)"
+            })
+            return frames, "Success"
+        else:
+            return None, "Rerouting failed! Drone trapped."
+    else:
+        # Normal Path
+        for i in range(len(path) - 1):
+            r1, c1 = path[i]
+            r2, c2 = path[i+1]
+            for step in range(frames_per_cell):
+                r_pos = r1 + (r2 - r1) * (step / float(frames_per_cell))
+                c_pos = c1 + (c2 - c1) * (step / float(frames_per_cell))
+                frames.append({
+                    'pos': (r_pos, c_pos), 'path': path, 'old_path': None, 
+                    'disruption': None, 'msg': "🚁 Flight navigating smoothly..."
+                })
+        frames.append({
+            'pos': path[-1], 'path': path, 'old_path': None, 
+            'disruption': None, 'msg': "🎉 Delivery Complete!"
+        })
+        return frames, "Success"
+
 def main():
     st.set_page_config(page_title="AeroNet Lite Dashboard", layout="wide")
-    st.title("🚁 AeroNet Lite: Animated Drone Simulator")
+    st.title("🚁 AeroNet Lite: Flight Tracker")
     
     # Base Grid
     grid = create_grid()
@@ -109,7 +203,7 @@ def main():
     col1, col2 = st.columns([2, 1.2])
     
     with col1:
-        st.subheader("Interactive Drone Flight Simulation")
+        st.subheader("Interactive Drone Flight Timeline")
         
         c1, c2, c3, c4 = st.columns(4)
         with c1:
@@ -123,108 +217,52 @@ def main():
             st.markdown("<br>", unsafe_allow_html=True)
             simulate_disruption = st.checkbox("Trigger Disruption")
             
-        # Placeholders for dynamic animation
-        status_text = st.empty()
-        plot_placeholder = st.empty()
-        
-        # Apply Hub sync before routing
         try:
             sr, sc = map(int, start_point.split(','))
+            gr, gc = map(int, goal_point.split(','))
             if sync_hub:
                 grid[sr][sc].is_hub = True
                 grid[sr][sc].zone = 'Commercial'
         except:
             pass
 
-        # Draw default grid before animation
-        if not st.session_state.get('animating', False):
-            plot_placeholder.pyplot(draw_grid(grid))
-
-        if st.button("🚀 Launch Drone Mission", type="primary"):
+        if st.button("🚀 Calculate Optimal Route", type="primary"):
             try:
-                gr, gc = map(int, goal_point.split(','))
-                path, cost, msg = astar((sr, sc), (gr, gc), grid)
-                
-                if path and simulate_disruption:
-                    if len(path) > 3:
-                        disruption_idx = len(path) // 2
-                        disruption_cell = path[disruption_idx]
-                        old_path = list(path)
-                        
-                        # Animate Part 1: Takeoff to Disruption
-                        for i in range(disruption_idx - 1):
-                            r1, c1 = path[i]
-                            r2, c2 = path[i+1]
-                            for step in range(4):
-                                interp_r = r1 + (r2 - r1) * (step / 4.0)
-                                interp_c = c1 + (c2 - c1) * (step / 4.0)
-                                status_text.info(f"🚁 Drone in flight... Heading to ({r2}, {c2})")
-                                fig = draw_grid(grid, path=path, drone_pos=(interp_r, interp_c))
-                                plot_placeholder.pyplot(fig)
-                                plt.close(fig)
-                                time.sleep(0.05)
-                            
-                        # Trigger Disruption
-                        status_text.warning(f"💥 ALERT: Severe Weather activated at {disruption_cell}! Drone executing emergency A* replanning...")
-                        grid[disruption_cell[0]][disruption_cell[1]].no_fly = True
-                        current_loc = path[disruption_idx - 1]
-                        
-                        time.sleep(1.0) # Pause for dramatic effect
-                        
-                        # Recalculate
-                        new_path, new_cost, new_msg = astar(current_loc, (gr, gc), grid)
-                        if new_path:
-                            path = path[:disruption_idx] + new_path[1:]
-                            
-                            # Animate Part 2: Detour to Goal
-                            for i in range(disruption_idx - 1, len(path)-1):
-                                r1, c1 = path[i]
-                                r2, c2 = path[i+1]
-                                for step in range(4):
-                                    interp_r = r1 + (r2 - r1) * (step / 4.0)
-                                    interp_c = c1 + (c2 - c1) * (step / 4.0)
-                                    status_text.success(f"✅ Rerouting successful! Navigating to ({r2}, {c2})")
-                                    fig = draw_grid(grid, path=path, old_path=old_path, disruption=disruption_cell, drone_pos=(interp_r, interp_c))
-                                    plot_placeholder.pyplot(fig)
-                                    plt.close(fig)
-                                    time.sleep(0.05)
-                            
-                            # Draw final position
-                            fig = draw_grid(grid, path=path, old_path=old_path, disruption=disruption_cell, drone_pos=path[-1])
-                            plot_placeholder.pyplot(fig)
-                            plt.close(fig)
-                            status_text.success(f"🎉 Delivery Complete! Total Manhattan Cost: {len(path)-1} moves.")
-                        else:
-                            status_text.error("Rerouting failed: Drone trapped! Initiating emergency landing.")
-                            fig = draw_grid(grid, path=path[:disruption_idx], old_path=old_path, disruption=disruption_cell, drone_pos=current_loc)
-                            plot_placeholder.pyplot(fig)
-                            plt.close(fig)
-                            
-                elif path:
-                    # Normal Animation
-                    for i in range(len(path)-1):
-                        r1, c1 = path[i]
-                        r2, c2 = path[i+1]
-                        for step in range(4): # 4 frames between cells for smoothness
-                            interp_r = r1 + (r2 - r1) * (step / 4.0)
-                            interp_c = c1 + (c2 - c1) * (step / 4.0)
-                            status_text.info(f"🚁 Drone in flight... Heading to ({r2}, {c2})")
-                            fig = draw_grid(grid, path=path, drone_pos=(interp_r, interp_c))
-                            plot_placeholder.pyplot(fig)
-                            plt.close(fig)
-                            time.sleep(0.05)
-                    
-                    # Draw final position
-                    fig = draw_grid(grid, path=path, drone_pos=path[-1])
-                    plot_placeholder.pyplot(fig)
-                    plt.close(fig)
-                    status_text.success(f"🎉 Delivery Complete! Total Manhattan Cost: {cost} moves.")
+                frames, msg = generate_frames(grid, (sr, sc), (gr, gc), simulate_disruption)
+                if frames:
+                    st.session_state.frames = frames
+                    st.session_state.frame_idx = 0
                 else:
-                    status_text.error(f"Routing failed before takeoff: {msg}")
-                    
+                    st.error(f"Routing failed: {msg}")
             except Exception as e:
-                st.error("Invalid coordinate format. Please use 'row,col' (e.g. 1,3).")
+                st.error("Invalid coordinate format. Please use 'row,col'.")
                 
+        # SLIDER SCRUBBING UI
+        if 'frames' in st.session_state and st.session_state.frames:
+            frames = st.session_state.frames
+            
+            # The Timeline Slider
+            frame_idx = st.slider("⏱️ Scrub Flight Timeline (Drag to move drone)", 0, len(frames)-1, 0)
+            
+            # Get current frame data
+            frame = frames[frame_idx]
+            
+            # Print status message
+            if "ALERT" in frame['msg']:
+                st.warning(frame['msg'])
+            elif "Complete" in frame['msg']:
+                st.success(frame['msg'])
+            else:
+                st.info(frame['msg'])
+                
+            # Draw that specific frame
+            fig = draw_grid(grid, path=frame['path'], old_path=frame['old_path'], disruption=frame['disruption'], drone_pos=frame['pos'])
+            st.pyplot(fig)
+        else:
+            # Default state before calculation
+            fig = draw_grid(grid)
+            st.pyplot(fig)
+                    
     with col2:
         st.subheader("Module 1: Layout Validation (CSP)")
         validator = LayoutValidator(grid)
