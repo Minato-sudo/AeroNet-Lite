@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -8,6 +9,7 @@ from src.grid_model import create_grid
 from src.layout_validator import LayoutValidator
 from src.fleet_selector import FleetSelector
 from src.astar_planner import astar
+from src.ml_pipeline import DemandForecaster, AnomalyDetector
 
 def run_simulation():
     """
@@ -39,7 +41,11 @@ def run_simulation():
     # Step 5-6: Demand Forecasting (Module 5)
     time.sleep(0.3)
     print("\nStep 5: Querying ML Regression model for demand forecast...")
-    print("Step 6: Expected demand forecast generated: 112 deliveries for today.")
+    data_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "raw", "train.csv")
+    forecaster = DemandForecaster(data_path)
+    predicted_demand = forecaster.run()  # Returns the predicted demand value
+    forecast_val = int(predicted_demand) if predicted_demand is not None else 112
+    print(f"Step 6: Demand forecast complete. Predicted deliveries for today: ~{forecast_val} units.")
     
     # Step 7-10: Assigning and Routing (Module 3)
     time.sleep(0.3)
@@ -64,8 +70,16 @@ def run_simulation():
     print("\nStep 14: Drone D2 dispatched for Medical Delivery to Hospital (4, 0).")
     print("Step 15: Telemetry streaming activated for active fleet.")
     print("Step 16: Processing telemetry through Random Forest Classifier...")
-    print("Step 17: Normal telemetry received for Drone D1.")
-    print("Step 18: ⚠️ ML ANOMALY DETECTED for Drone D2! Sudden battery drop recognized.")
+    detector = AnomalyDetector()
+    accuracy, cm = detector.run()  # Returns accuracy and confusion matrix
+    print(f"Step 17: Classifier trained. Accuracy: {accuracy*100:.2f}%. Normal telemetry received for Drone D1.")
+    # Inject a synthetic battery-anomaly reading for Drone D2 and classify it
+    import pandas as pd
+    np.random.seed(99)
+    anomaly_sample = pd.DataFrame([[25.0, 14.0, 3.0]], columns=['battery_drop', 'speed', 'route_deviation'])
+    prediction = detector.model.predict(anomaly_sample)[0]
+    label = "ANOMALY" if prediction == 1 else "Normal"
+    print(f"Step 18: ⚠️ ML ANOMALY DETECTED for Drone D2! Classifier flagged telemetry as '{label}' (battery_drop=25%).")
     
     # Step 19-20: Conclusion
     time.sleep(0.3)

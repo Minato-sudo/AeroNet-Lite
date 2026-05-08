@@ -48,6 +48,9 @@ class DemandForecaster:
         sample = X_test.iloc[[0]]
         pred = self.model.predict(sample)
         print(f"Sample Prediction -> Predicted Demand: {pred[0]:.0f}, Actual Demand: {y_test.iloc[0]}")
+        
+        # Return average predicted demand across test set for downstream use
+        return float(predictions.mean())
 
 class AnomalyDetector:
     def __init__(self):
@@ -116,6 +119,8 @@ class AnomalyDetector:
         print(f"Confusion Matrix:\n{cm}")
         print("\n(Confusion Matrix format: \n[True Negatives  False Positives]\n[False Negatives True Positives])")
         print("="*50 + "\n")
+        
+        return acc, cm
 
 if __name__ == "__main__":
     # Demand Forecasting
