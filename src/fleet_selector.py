@@ -5,11 +5,12 @@ class FleetSelector:
         self.total_demand = total_demand
         self.budget = budget
         
-        # Drone definitions
-        # Format: {'type': (cost, capacity)}
+        # Drone definitions per spec: (cost, payload_kg)
+        # Light Drone: $1,000 | 2 kg payload | 12-cell range
+        # Heavy Drone: $1,800 | 5 kg payload | 20-cell range
         self.drones = {
-            'Light': (1000, 5),   # Cheaper but low capacity
-            'Heavy': (2500, 15)   # Expensive but high capacity
+            'Light': (1000, 2),
+            'Heavy': (1800, 5)
         }
         
     def fitness(self, genome) -> float:
@@ -103,17 +104,17 @@ if __name__ == "__main__":
     best_fleet, score = selector.run_genetic_algorithm()
     
     num_light, num_heavy = best_fleet
-    cost = num_light * 1000 + num_heavy * 2500
-    capacity = num_light * 5 + num_heavy * 15
+    cost     = num_light * 1000 + num_heavy * 1800
+    capacity = num_light * 2    + num_heavy * 5
     
     print("\n" + "="*50)
     print("   AeroNet Lite: Fleet Selection Report (GA)")
     print("="*50)
-    print(f"Target Demand: 50 units")
-    print(f"Total Budget:  $10,000")
+    print(f"Target Demand:  50 kg payload")
+    print(f"Total Budget:   $10,000")
     print("-" * 50)
     print(f"Selected Fleet: {num_light} Light Drones, {num_heavy} Heavy Drones")
-    print(f"Total Cost:     ${cost}")
-    print(f"Total Capacity: {capacity} units")
+    print(f"Total Cost:     ${cost:,}")
+    print(f"Total Payload:  {capacity} kg")
     print(f"Fitness Score:  {score:.4f}")
     print("="*50 + "\n")

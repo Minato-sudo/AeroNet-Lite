@@ -92,25 +92,46 @@ class LayoutValidator:
             self.passed_rules.append("R3: Hub Charging Access (All hubs within distance 2 of a charging station)")
 
     def check_medical_access(self):
-        """Rule 4: Every Hospital must be marked as a medical pickup point and accessible to a hub (dist <= 4)."""
+        """
+        Rule 4 (spec exact): At least one Hospital must have a Medical Pickup
+        point within 1 Manhattan cell of it.
+        Also checks: all hospitals should be marked is_medical_pickup=True.
+        """
         rule_passed = True
-        hospitals = self.find_cells(lambda c: c.zone == 'Hospital')
-        hubs = self.find_cells(lambda c: c.is_hub)
-        
+        hospitals  = self.find_cells(lambda c: c.zone == 'Hospital')
+        pickups    = self.find_cells(lambda c: c.is_medical_pickup)
+
+        if not hospitals:
+            self.passed_rules.append("R4: Medical Access (no hospitals to check)")
+            return
+
+        # Core spec rule: at least one hospital must have a pickup within 1 cell
+        at_least_one_covered = False
+        for hosp in hospitals:
+            nearby_pickups = [p for p in pickups
+                              if self.manhattan(hosp.row, hosp.col, p.row, p.col) <= 1]
+            if nearby_pickups:
+                at_least_one_covered = True
+                break
+
+        if not at_least_one_covered:
+            rule_passed = False
+            self.errors.append(
+                "R4 Failed: No Hospital has a Medical Pickup cell within 1 cell distance. "
+                "Suggested fix: mark at least one cell adjacent to a Hospital as is_medical_pickup=True."
+            )
+
+        # Secondary check: every individual hospital cell should be flagged
         for hosp in hospitals:
             if not hosp.is_medical_pickup:
                 rule_passed = False
-                self.errors.append(f"R4 Failed: Hospital ({hosp.row}, {hosp.col}) is not marked as a medical pickup point. Suggested fix: set is_medical_pickup=True.")
-            
-            # Ensure hospital can actually be reached by a drone from a hub efficiently
-            if hubs:
-                min_dist = min(self.manhattan(hosp.row, hosp.col, hub.row, hub.col) for hub in hubs)
-                if min_dist > 4:
-                    rule_passed = False
-                    self.errors.append(f"R4 Failed: Hospital ({hosp.row}, {hosp.col}) is too far (dist {min_dist}) from any hub for urgent delivery. Suggested fix: build a hub closer.")
-                
+                self.errors.append(
+                    f"R4 Failed: Hospital ({hosp.row}, {hosp.col}) itself is not marked as "
+                    f"is_medical_pickup=True. Suggested fix: set is_medical_pickup=True for this cell."
+                )
+
         if rule_passed:
-            self.passed_rules.append("R4: Medical Access (Hospitals correctly marked and within range of a hub)")
+            self.passed_rules.append("R4: Medical Access (≥1 Hospital has a Medical Pickup within 1 cell)")
 
     def run_validation(self) -> bool:
         """Runs all rules and prints a professional report."""

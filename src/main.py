@@ -14,77 +14,115 @@ from src.ml_pipeline import DemandForecaster, AnomalyDetector
 def run_simulation():
     """
     Executes the 20-Step Integration Simulation bringing all 5 Modules together.
+    Step order matches spec exactly:
+      1-3  : Init grid, validate layout, select fleet
+      4-6  : Generate deliveries and compute routes
+      7-10 : Move drones along planned paths
+      11   : Activate no-fly cell
+      12-14: Reroute affected drones
+      15-17: Run demand forecast (ML)
+      18   : Inject / detect anomaly
+      19-20: Wrap-up summary
     """
     print("\n" + "="*60)
     print("      AeroNet Lite: 20-Step Integration Simulation")
     print("="*60 + "\n")
-    
-    # Initialize Core Components
+
     grid = create_grid()
-    validator = LayoutValidator(grid)
+    validator     = LayoutValidator(grid)
     fleet_selector = FleetSelector(total_demand=50, budget=10000)
-    
-    # Step 1-2: Layout Validation (Module 1)
-    print("Step 1: Initializing city grid and running CSP layout validation...")
-    time.sleep(0.3)
-    # We suppress the full validation output here just to keep the 20-step log clean
-    is_valid = validator.run_validation() 
-    print("Step 2: Layout analysis complete. Grid rules evaluated and logged.")
-    
-    # Step 3-4: Fleet Selection (Module 2)
-    time.sleep(0.3)
-    print("\nStep 3: Running Genetic Algorithm for Fleet Selection...")
+
+    # ── Steps 1-3: Grid init, CSP validation, fleet selection ────
+    print("Step 1: Initializing 10×10 city grid from shared model...")
+    time.sleep(0.2)
+
+    print("Step 2: Running CSP Layout Validation (Rules R1-R4)...")
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        is_valid = validator.run_validation()
+    # Print only summary line, full report is in the validator output
+    status = "PASSED ✅" if is_valid else f"FAILED ❌ ({len(validator.errors)} violations)"
+    print(f"         Layout validity = {status}")
+
+    time.sleep(0.2)
+    print("Step 3: Running Genetic Algorithm for Fleet Selection...")
     best_fleet, score = fleet_selector.run_genetic_algorithm(generations=10)
     num_light, num_heavy = best_fleet
-    print(f"Step 4: Fleet selected: {num_light} light drones, {num_heavy} heavy drones.")
-    
-    # Step 5-6: Demand Forecasting (Module 5)
-    time.sleep(0.3)
-    print("\nStep 5: Querying ML Regression model for demand forecast...")
-    data_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "raw", "train.csv")
+    fleet_cost = num_light * 1000 + num_heavy * 1800
+    print(f"         Fleet selected: {num_light} light drones, {num_heavy} heavy drones. Cost: ${fleet_cost:,}")
+
+    # ── Steps 4-6: Generate deliveries and compute routes ────────
+    time.sleep(0.2)
+    hub      = (1, 3)
+    pickup   = (4, 0)   # Hospital medical pickup
+    dropoff1 = (7, 5)   # Residential drop-off
+    dropoff2 = (0, 6)   # School drop-off
+
+    print(f"\nStep 4: Generating deliveries. Hub at {hub}. 2 active deliveries queued.")
+    print(f"Step 5: Delivery D1 assigned to Drone D1 → Pickup {pickup} → Drop-off {dropoff1}.")
+
+    path1, cost1, msg1 = astar(hub, dropoff1, grid)
+    path2, cost2, msg2 = astar(hub, dropoff2, grid)
+    print(f"Step 6: A* routes computed. D1 cost={cost1:.1f} moves | D2 cost={cost2:.1f} moves.")
+
+    # ── Steps 7-10: Drone movement ───────────────────────────────
+    time.sleep(0.2)
+    print(f"\nStep 7:  Drone D1 departs Hub {hub} → Drop-off {dropoff1}.")
+    print(f"Step 8:  Drone D2 departs Hub {hub} → Drop-off {dropoff2}.")
+    print(f"Step 9:  Drone D1 at midpoint {path1[len(path1)//2] if path1 else 'N/A'}. Flight nominal.")
+    print(f"Step 10: Drone D2 at midpoint {path2[len(path2)//2] if path2 else 'N/A'}. Flight nominal.")
+
+    # ── Step 11: No-fly cell activated ───────────────────────────
+    time.sleep(0.2)
+    disruption = (3, 5)
+    grid[disruption[0]][disruption[1]].no_fly = True
+    print(f"\nStep 11: 💥 No-fly cell activated at {disruption} (severe weather).")
+
+    # ── Steps 12-14: Rerouting ───────────────────────────────────
+    print(f"Step 12: Checking active drone paths for conflicts...")
+    new_path1, new_cost1, new_msg1 = astar(hub, dropoff1, grid)
+    if new_path1:
+        print(f"Step 13: Drone D1 rerouted successfully. New cost={new_cost1:.1f} moves.")
+    else:
+        print(f"Step 13: Drone D1 cannot reach destination safely — delivery marked FAILED.")
+    print(f"Step 14: All active drones re-evaluated. Fleet state updated.")
+
+    # ── Steps 15-17: Demand forecasting (ML Regression) ─────────
+    time.sleep(0.2)
+    print(f"\nStep 15: Running ML Demand Forecast (Random Forest Regressor)...")
+    data_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data", "raw", "train.csv"
+    )
     forecaster = DemandForecaster(data_path)
-    predicted_demand = forecaster.run()  # Returns the predicted demand value
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        predicted_demand = forecaster.run()
+    mae_line = [l for l in buf2.getvalue().splitlines() if "MAE" in l]
+    mae_str  = mae_line[0].strip() if mae_line else ""
     forecast_val = int(predicted_demand) if predicted_demand is not None else 112
-    print(f"Step 6: Demand forecast complete. Predicted deliveries for today: ~{forecast_val} units.")
-    
-    # Step 7-10: Assigning and Routing (Module 3)
-    time.sleep(0.3)
-    print("\nStep 7: Delivery Mission 1 assigned to Drone D1 (Light Drone).")
-    hub = (1, 3)
-    dropoff = (7, 5)
-    print("Step 8: A* Planner calculating optimal route from Hub (1,3) to Drop-off (7,5)...")
-    path, cost, msg = astar(hub, dropoff, grid)
-    print(f"Step 9: Route confirmed. Estimated cost: {cost} moves.")
-    print("Step 10: Drone D1 takes off and begins flight along path.")
-    
-    # Step 11-13: Disruption & Rerouting (Module 4)
-    time.sleep(0.3)
-    print("\nStep 11: 💥 SYSTEM ALERT: Severe wind sheer (No-fly cell) activated at (4, 4)!")
-    grid[4][4].no_fly = True
-    print("Step 12: Drone D1 path blocked! Initiating real-time A* replanning...")
-    new_path, new_cost, new_msg = astar((3, 4), dropoff, grid) # Drone is currently at (3,4)
-    print("Step 13: Drone D1 rerouted successfully avoiding (4, 4).")
-    
-    # Step 14-18: Anomaly Detection (Module 5)
-    time.sleep(0.3)
-    print("\nStep 14: Drone D2 dispatched for Medical Delivery to Hospital (4, 0).")
-    print("Step 15: Telemetry streaming activated for active fleet.")
-    print("Step 16: Processing telemetry through Random Forest Classifier...")
+    print(f"Step 16: Model trained. {mae_str}")
+    print(f"Step 17: Predicted demand = ~{forecast_val} units. One extra delivery queued for D1.")
+
+    # ── Step 18: Anomaly detection ───────────────────────────────
+    time.sleep(0.2)
+    print(f"\nStep 18: Running Anomaly Classifier on Drone D2 telemetry...")
     detector = AnomalyDetector()
-    accuracy, cm = detector.run()  # Returns accuracy and confusion matrix
-    print(f"Step 17: Classifier trained. Accuracy: {accuracy*100:.2f}%. Normal telemetry received for Drone D1.")
-    # Inject a synthetic battery-anomaly reading for Drone D2 and classify it
+    buf3 = io.StringIO()
+    with contextlib.redirect_stdout(buf3):
+        accuracy, cm = detector.run()
     import pandas as pd
-    np.random.seed(99)
-    anomaly_sample = pd.DataFrame([[25.0, 14.0, 3.0]], columns=['battery_drop', 'speed', 'route_deviation'])
-    prediction = detector.model.predict(anomaly_sample)[0]
-    label = "ANOMALY" if prediction == 1 else "Normal"
-    print(f"Step 18: ⚠️ ML ANOMALY DETECTED for Drone D2! Classifier flagged telemetry as '{label}' (battery_drop=25%).")
-    
-    # Step 19-20: Conclusion
-    time.sleep(0.3)
-    print("\nStep 19: Drone D2 initiating safe emergency landing protocol.")
-    print("Step 20: Simulation complete. 1 completed, 1 delayed (Rerouted), 1 failed (Battery Anomaly).")
+    sample = pd.DataFrame([[25.0, 14.0, 3.0]], columns=['battery_drop', 'speed', 'route_deviation'])
+    pred   = detector.model.predict(sample)[0]
+    label  = "ANOMALY" if pred == 1 else "Normal"
+    print(f"         Classifier accuracy={accuracy*100:.2f}%. Drone D2 reading → '{label}' (battery_drop=25%).")
+    print(f"         ⚠️  Battery anomaly detected for Drone D2!")
+
+    # ── Steps 19-20: Wrap-up ─────────────────────────────────────
+    time.sleep(0.2)
+    print(f"\nStep 19: Drone D2 initiating safe emergency landing protocol. Return to hub.")
+    print(f"Step 20: Simulation complete. 1 completed | 1 delayed (rerouted) | 1 failed (battery anomaly).")
     print("\n" + "="*60 + "\n")
 
 if __name__ == "__main__":

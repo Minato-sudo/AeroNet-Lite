@@ -63,7 +63,10 @@ def astar(start: Tuple[int, int], goal: Tuple[int, int], grid: List[List[Cell]])
             
         # Explore valid neighbors
         for neighbor in get_valid_neighbors(grid, current):
-            tentative_g_score = g_score[current] + 1  # Cost to move 1 cell is always 1
+            nr, nc = neighbor
+            # Spec: 0.8 cost for commercial corridor, 1.0 for all other cells
+            move_cost = 0.8 if grid[nr][nc].zone == 'Commercial' else 1.0
+            tentative_g_score = g_score[current] + move_cost
             
             # If we found a cheaper path to this neighbor
             if neighbor not in g_score or tentative_g_score < g_score[neighbor]:
