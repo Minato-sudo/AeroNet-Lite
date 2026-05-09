@@ -60,7 +60,13 @@ def run_tests():
     validator = LayoutValidator(grid)
     is_valid = validator.run_validation()
     assert_test("Detect intentional flaws in sample grid (is_valid == False)", is_valid == False)
-    assert_test("Detect Hospital too far from Hub rule violation", any("Hospital" in err for err in validator.errors))
+    
+    # Test R4 specifically: Unset medical pickup for a hospital
+    grid[4][0].is_medical_pickup = False
+    validator_r4 = LayoutValidator(grid)
+    validator_r4.run_validation()
+    assert_test("Detect Hospital missing Medical Pickup flag", any("Hospital" in err for err in validator_r4.errors))
+    grid[4][0].is_medical_pickup = True # Reset
     
     # Test 2.2: Fix flaws to achieve 100% valid grid
     # To definitively fix distance constraints for testing purposes, we blanket the grid with Hubs and Chargers

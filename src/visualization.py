@@ -193,9 +193,16 @@ def main():
             grid[r][c].demand = grid[r][c].density / 100.0
 
     if fix_layout:
+        # Realistic fix: Add hubs and their required chargers
+        grid[0][0].is_hub = True; grid[1][0].is_charging = True # Charger for (0,0)
+        grid[2][0].is_hub = True; grid[2][1].is_charging = True # Charger for (2,0)
+        grid[5][5].is_charging = True # Charger for existing hub at (5,6)
+        
+        # Ensure all hospitals have pickup flags
         for r in range(10):
             for c in range(10):
-                grid[r][c].is_hub=True; grid[r][c].is_charging=True
+                if grid[r][c].zone == 'Hospital':
+                    grid[r][c].is_medical_pickup = True
     if trap_drone:
         grid[0][1].no_fly=True; grid[1][0].no_fly=True
 
@@ -313,8 +320,8 @@ def main():
             st.markdown("""
 | Drone | Cost | Payload | Range |
 |-------|------|---------|-------|
-| Light 🟡 | $1,000 | 5 kg | 12 cells |
-| Heavy 🔵 | $2,500 | 15 kg | 20 cells |
+| Light 🟡 | $1,000 | 2 kg | 12 cells |
+| Heavy 🔵 | $1,800 | 5 kg | 20 cells |
 
 **Fitness:** `score = 0.75 × coverage% − 0.25 × budget_used%`
 """)
@@ -327,18 +334,18 @@ def main():
                     sel=FleetSelector(total_demand=int(demand_input),budget=int(budget_input))
                     fleet,score=sel.run_genetic_algorithm(generations=gens,pop_size=pop)
                 nl,nh=fleet
-                cost=nl*1000+nh*2500
-                cap=nl*5+nh*15
+                cost=nl*1000+nh*1800
+                cap=nl*2+nh*5
                 st.success(f"**Best Fleet: {nl} Light + {nh} Heavy Drones**")
                 m1,m2,m3,m4=st.columns(4)
                 m1.metric("Light Drones",nl)
                 m2.metric("Heavy Drones",nh)
                 m3.metric("Total Cost",f"${cost:,}")
                 m4.metric("Capacity",f"{cap} units")
-                used_pct=cost/budget_input*100
-                cov_pct=min(100,cap/demand_input*100)
-                st.progress(int(used_pct),text=f"Budget used: {used_pct:.1f}%")
-                st.progress(int(cov_pct), text=f"Demand covered: {cov_pct:.1f}%")
+                used_pct=min(100, int(cost/budget_input*100))
+                cov_pct=min(100, int(cap/demand_input*100))
+                st.progress(used_pct,text=f"Budget used: {cost/budget_input*100:.1f}%")
+                st.progress(cov_pct, text=f"Demand covered: {cap/demand_input*100:.1f}%")
                 st.metric("Fitness Score", f"{score:.4f}")
             else:
                 st.info("Set budget & demand in the sidebar, then click **Evolve Fleet**.")
@@ -385,25 +392,24 @@ def main():
         st.markdown("Trained on **2,000 synthetic drone telemetry samples** (15% anomaly rate).")
         run_cls=st.button("⚠️ Train Classifier", use_container_width=False)
         if run_cls:
-            detector=AnomalyDetector()
+            st.session_state.detector = AnomalyDetector()
             with st.spinner("Training classifier on synthetic telemetry..."):
-                result,out=run_capture(detector.run)
-            acc,cm=result
+                st.session_state.cls_result, st.session_state.cls_out = run_capture(st.session_state.detector.run)
+
+        if 'detector' in st.session_state:
+            acc, cm = st.session_state.cls_result
             c1,c2,c3=st.columns(3)
             c1.metric("Model","Random Forest")
             c2.metric("Accuracy",f"{acc*100:.2f}%")
             c3.metric("Anomaly Rate","~15%")
 
-            # Confusion matrix heatmap
             fig,ax=plt.subplots(figsize=(4,3))
             fig.patch.set_facecolor(CARD_BG)
             ax.set_facecolor(CARD_BG)
-            im=ax.imshow(cm,cmap='Blues')
+            ax.imshow(cm,cmap='Blues')
             ax.set_xticks([0,1]); ax.set_yticks([0,1])
             ax.set_xticklabels(["Normal","Anomaly"],color="#CBD5E1")
             ax.set_yticklabels(["Normal","Anomaly"],color="#CBD5E1")
-            ax.set_xlabel("Predicted",color="#94A3B8")
-            ax.set_ylabel("Actual",color="#94A3B8")
             ax.set_title("Confusion Matrix",color="#E2E8F0",fontweight='bold')
             for i in range(2):
                 for j in range(2):
@@ -412,16 +418,15 @@ def main():
             plt.tight_layout()
             st.pyplot(fig)
 
-            # Live classify custom sample
             st.markdown("---")
-            st.markdown("**🔬 Classify a Custom Telemetry Reading**")
+            st.markdown("**🔬 Live Test: Classify Telemetry Reading**")
             sc1,sc2,sc3=st.columns(3)
-            batt = sc1.slider("Battery Drop (%/sector)",0.0,35.0,5.0,.5)
+            batt = sc1.slider("Battery Drop (%)",0.0,35.0,5.0,.5)
             spd  = sc2.slider("Speed (m/s)",0.0,30.0,15.0,.5)
             dev  = sc3.slider("Route Deviation (m)",0.0,100.0,2.0,1.0)
             sample=pd.DataFrame([[batt,spd,dev]],columns=['battery_drop','speed','route_deviation'])
-            pred=detector.model.predict(sample)[0]
-            prob=detector.model.predict_proba(sample)[0]
+            pred=st.session_state.detector.model.predict(sample)[0]
+            prob=st.session_state.detector.model.predict_proba(sample)[0]
             if pred==1:
                 st.error(f"🚨 **ANOMALY DETECTED** — Confidence: {prob[1]*100:.1f}%")
             else:
