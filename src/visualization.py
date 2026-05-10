@@ -263,30 +263,66 @@ def main():
 
             if calc_btn:
                 if use_pickup:
-                    # Full 3-leg route: Hub → Pickup → Goal → Hub
-                    leg1,c1_,m1 = astar((sr,sc),(pr,pc),grid)
-                    leg2,c2_,m2 = astar((pr,pc),(gr,gc),grid)
-                    leg3,c3_,m3 = astar((gr,gc),(sr,sc),grid)
+                    # Find nearest hub to dropoff for smart return
+                    hubs_in_grid = [(r,c) for r in range(10) for c in range(10) if grid[r][c].is_hub]
+                    if hubs_in_grid:
+                        nearest_hub = min(hubs_in_grid,
+                            key=lambda h: abs(h[0]-gr)+abs(h[1]-gc))
+                    else:
+                        nearest_hub = (sr,sc)  # fallback to origin
+
+                    leg1,c1_,m1 = astar((sr,sc),(pr,pc),grid)   # Hub → Pickup
+                    leg2,c2_,m2 = astar((pr,pc),(gr,gc),grid)   # Pickup → Dropoff
+                    leg3,c3_,m3 = astar((gr,gc),nearest_hub,grid) # Dropoff → Nearest Hub
+
                     if leg1 and leg2 and leg3:
                         full_path = leg1 + leg2[1:] + leg3[1:]
                         total_cost = c1_+c2_+c3_
-                        # Build frames manually for 3-leg path (no disruption on full route)
                         frames=[]
-                        legs = [(leg1,"🚁 Leg 1: Hub → Pickup"),(leg2,"📦 Leg 2: Pickup → Drop-off"),(leg3[:-1] if len(leg3)>1 else leg3,"🏠 Leg 3: Returning to Hub")]
                         fpf=6
-                        for leg_path,leg_msg in legs:
-                            for i in range(len(leg_path)-1):
-                                r1,c1_=leg_path[i]; r2,c2_=leg_path[i+1]
-                                for s in range(fpf):
-                                    frames.append({'pos':(r1+(r2-r1)*s/fpf,c1_+(c2_-c1_)*s/fpf),
-                                        'path':full_path,'old_path':None,'disruption':None,
-                                        'msg':f"{leg_msg} (total cost: {total_cost:.1f} moves)"})
-                        frames.append({'pos':(sr,sc),'path':full_path,'old_path':None,
-                            'disruption':None,'msg':"🎉 Full delivery cycle complete! Hub→Pickup→Goal→Hub"})
+
+                        # Leg 1: Hub → Pickup
+                        for i in range(len(leg1)-1):
+                            r1,c1_v=leg1[i]; r2,c2_v=leg1[i+1]
+                            for s in range(fpf):
+                                frames.append({'pos':(r1+(r2-r1)*s/fpf, c1_v+(c2_v-c1_v)*s/fpf),
+                                    'path':full_path,'old_path':None,'disruption':None,
+                                    'msg':"🚁 Leg 1: Flying to Pickup location..."})
+
+                        # Milestone: ORDER PICKED UP
+                        frames.append({'pos':(pr,pc),'path':full_path,'old_path':None,
+                            'disruption':None,'msg':"📦 ORDER PICKED UP at ({},{})!".format(pr,pc)})
+
+                        # Leg 2: Pickup → Dropoff
+                        for i in range(len(leg2)-1):
+                            r1,c1_v=leg2[i]; r2,c2_v=leg2[i+1]
+                            for s in range(fpf):
+                                frames.append({'pos':(r1+(r2-r1)*s/fpf, c1_v+(c2_v-c1_v)*s/fpf),
+                                    'path':full_path,'old_path':None,'disruption':None,
+                                    'msg':"📦 Leg 2: En route to Drop-off..."})
+
+                        # Milestone: ORDER DELIVERED
+                        frames.append({'pos':(gr,gc),'path':full_path,'old_path':None,
+                            'disruption':None,'msg':"✅ ORDER DELIVERED at ({},{})! Returning to nearest hub {}...".format(gr,gc,nearest_hub)})
+
+                        # Leg 3: Dropoff → Nearest Hub
+                        for i in range(len(leg3)-1):
+                            r1,c1_v=leg3[i]; r2,c2_v=leg3[i+1]
+                            for s in range(fpf):
+                                frames.append({'pos':(r1+(r2-r1)*s/fpf, c1_v+(c2_v-c1_v)*s/fpf),
+                                    'path':full_path,'old_path':None,'disruption':None,
+                                    'msg':"🏠 Leg 3: Returning to nearest hub {}...".format(nearest_hub)})
+
+                        # Final milestone
+                        frames.append({'pos':nearest_hub,'path':full_path,'old_path':None,
+                            'disruption':None,
+                            'msg':"🎉 Mission Complete! Hub→Pickup→Dropoff→Nearest Hub | Total cost: {:.1f} moves".format(total_cost)})
+
                         st.session_state['frames']=frames
-                        status_box.info(f"Full route: ({sr},{sc})→({pr},{pc})→({gr},{gc})→({sr},{sc}) | Cost: {total_cost:.1f}")
+                        st.session_state['pickup_info']={'pickup':(pr,pc),'dropoff':(gr,gc),'hub':nearest_hub,'cost':total_cost}
+                        status_box.info(f"Route: ({sr},{sc}) → Pickup({pr},{pc}) → Dropoff({gr},{gc}) → Hub{nearest_hub} | Cost: {total_cost:.1f}")
                     else:
-                        failed=[m for m,l in [(m1,leg1),(m2,leg2),(m3,leg3)] if not l]
+                        failed=[msg for msg,leg in [(m1,leg1),(m2,leg2),(m3,leg3)] if not leg]
                         status_box.error(f"❌ Route failed: {', '.join(failed)}")
                         st.session_state.pop('frames',None)
                 else:
@@ -305,6 +341,10 @@ def main():
                         status_box.error(f"🚨 EMERGENCY — {m}  \n**A\\* Replanning route in real-time...**")
                     elif "🎉" in m:
                         status_box.success(m)
+                    elif "ORDER DELIVERED" in m:
+                        status_box.success(m)
+                    elif "ORDER PICKED UP" in m:
+                        status_box.warning(m)  # Warning color (yellow/orange) looks good for 'picked up' state
                     elif "rerouted" in m.lower():
                         status_box.warning(f"⚠️ Rerouting... {m}")
                     else:
