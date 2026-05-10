@@ -32,11 +32,20 @@ def astar(start: Tuple[int, int], goal: Tuple[int, int], grid: List[List[Cell]])
     A* Pathfinding Algorithm.
     Returns: (path, total_cost, status_message)
     """
+    # Edge case: start == goal
+    if start == goal:
+        return [start], 0, "Already at destination."
+
+    # Edge case: out-of-bounds coordinates
+    rows, cols = len(grid), len(grid[0])
+    for point, name in [(start, "Start"), (goal, "Goal")]:
+        if not (0 <= point[0] < rows and 0 <= point[1] < cols):
+            return None, 0, f"Failed: {name} position {point} is out of grid bounds."
+
     if grid[start[0]][start[1]].no_fly:
         return None, 0, "Failed: Start position is a no-fly zone."
     if grid[goal[0]][goal[1]].no_fly:
         return None, 0, "Failed: Goal position is a no-fly zone."
-        
     # Priority Queue: stores tuples of (f_cost, current_node)
     open_set = []
     heapq.heappush(open_set, (0, start))

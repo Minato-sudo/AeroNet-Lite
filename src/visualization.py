@@ -247,6 +247,9 @@ def main():
             try:
                 sr,sc=map(int,start_point.split(','))
                 gr,gc=map(int,goal_point.split(','))
+                # Clamp to valid grid bounds (0-9)
+                sr,sc = max(0,min(9,sr)), max(0,min(9,sc))
+                gr,gc = max(0,min(9,gr)), max(0,min(9,gc))
                 if sync_hub:
                     grid[sr][sc].is_hub=True; grid[sr][sc].zone='Commercial'
             except:
