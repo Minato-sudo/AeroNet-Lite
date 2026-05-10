@@ -230,11 +230,13 @@ def main():
         col1,col2 = st.columns([3,1])
         with col2:
             st.markdown("#### Route Controls")
-            start_point = st.text_input("Start (row,col)","1,3")
-            goal_point  = st.text_input("Goal  (row,col)","7,5")
-            sync_hub    = st.checkbox("Pin start as Hub")
-            trigger_dis = st.checkbox("💥 Trigger Disruption")
-            calc_btn    = st.button("🚀 Fly Drone", use_container_width=True)
+            start_point  = st.text_input("🏠 Hub Start (row,col)","1,3")
+            pickup_point = st.text_input("📦 Pickup (row,col) — optional","4,0")
+            goal_point   = st.text_input("🎯 Drop-off Goal (row,col)","7,5")
+            use_pickup   = st.checkbox("🔄 Full Route: Hub→Pickup→Goal→Hub", value=True)
+            sync_hub     = st.checkbox("Pin start as Hub")
+            trigger_dis  = st.checkbox("💥 Trigger Disruption")
+            calc_btn     = st.button("🚀 Fly Drone", use_container_width=True)
             st.markdown("---")
             st.markdown("**Legend**")
             for zone,color in ZONE_COLORS.items():
@@ -247,24 +249,54 @@ def main():
             try:
                 sr,sc=map(int,start_point.split(','))
                 gr,gc=map(int,goal_point.split(','))
-                # Clamp to valid grid bounds (0-9)
+                pr,pc=map(int,pickup_point.split(','))
                 sr,sc = max(0,min(9,sr)), max(0,min(9,sc))
                 gr,gc = max(0,min(9,gr)), max(0,min(9,gc))
+                pr,pc = max(0,min(9,pr)), max(0,min(9,pc))
                 if sync_hub:
                     grid[sr][sc].is_hub=True; grid[sr][sc].zone='Commercial'
             except:
-                sr,sc,gr,gc=1,3,7,5
+                sr,sc,gr,gc,pr,pc=1,3,7,5,4,0
 
-            status_box   = st.empty()
-            plot_box     = st.empty()
+            status_box = st.empty()
+            plot_box   = st.empty()
 
             if calc_btn:
-                frames,msg = generate_frames(grid,(sr,sc),(gr,gc),trigger_dis)
-                if frames:
-                    st.session_state['frames']=frames
+                if use_pickup:
+                    # Full 3-leg route: Hub → Pickup → Goal → Hub
+                    leg1,c1_,m1 = astar((sr,sc),(pr,pc),grid)
+                    leg2,c2_,m2 = astar((pr,pc),(gr,gc),grid)
+                    leg3,c3_,m3 = astar((gr,gc),(sr,sc),grid)
+                    if leg1 and leg2 and leg3:
+                        full_path = leg1 + leg2[1:] + leg3[1:]
+                        total_cost = c1_+c2_+c3_
+                        # Build frames manually for 3-leg path (no disruption on full route)
+                        frames=[]
+                        legs = [(leg1,"🚁 Leg 1: Hub → Pickup"),(leg2,"📦 Leg 2: Pickup → Drop-off"),(leg3[:-1] if len(leg3)>1 else leg3,"🏠 Leg 3: Returning to Hub")]
+                        fpf=6
+                        for leg_path,leg_msg in legs:
+                            for i in range(len(leg_path)-1):
+                                r1,c1_=leg_path[i]; r2,c2_=leg_path[i+1]
+                                for s in range(fpf):
+                                    frames.append({'pos':(r1+(r2-r1)*s/fpf,c1_+(c2_-c1_)*s/fpf),
+                                        'path':full_path,'old_path':None,'disruption':None,
+                                        'msg':f"{leg_msg} (total cost: {total_cost:.1f} moves)"})
+                        frames.append({'pos':(sr,sc),'path':full_path,'old_path':None,
+                            'disruption':None,'msg':"🎉 Full delivery cycle complete! Hub→Pickup→Goal→Hub"})
+                        st.session_state['frames']=frames
+                        status_box.info(f"Full route: ({sr},{sc})→({pr},{pc})→({gr},{gc})→({sr},{sc}) | Cost: {total_cost:.1f}")
+                    else:
+                        failed=[m for m,l in [(m1,leg1),(m2,leg2),(m3,leg3)] if not l]
+                        status_box.error(f"❌ Route failed: {', '.join(failed)}")
+                        st.session_state.pop('frames',None)
                 else:
-                    st.session_state.pop('frames',None)
-                    status_box.error(f"❌ Routing failed: {msg}")
+                    # Simple A→B mode
+                    frames,msg = generate_frames(grid,(sr,sc),(gr,gc),trigger_dis)
+                    if frames:
+                        st.session_state['frames']=frames
+                    else:
+                        st.session_state.pop('frames',None)
+                        status_box.error(f"❌ Routing failed: {msg}")
 
             if 'frames' in st.session_state and st.session_state['frames']:
                 for frame in st.session_state['frames']:
@@ -272,7 +304,7 @@ def main():
                     if "💥" in m:
                         status_box.error(f"🚨 EMERGENCY — {m}  \n**A\\* Replanning route in real-time...**")
                     elif "🎉" in m:
-                        status_box.success(f"✅ MISSION COMPLETE — Drone safely delivered despite disruption!")
+                        status_box.success(m)
                     elif "rerouted" in m.lower():
                         status_box.warning(f"⚠️ Rerouting... {m}")
                     else:
