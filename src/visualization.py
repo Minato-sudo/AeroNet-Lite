@@ -36,18 +36,18 @@ CSS = f"""
 html, body, [class*="css"] {{ font-family:'Inter',sans-serif; background:{DARK_BG}; color:#E2E8F0; }}
 .stApp {{ background:{DARK_BG}; }}
 section[data-testid="stSidebar"] {{ background:{CARD_BG}; border-right:1px solid #2D3748; }}
-.block-container {{ padding:1.5rem 2rem; }}
+.block-container {{ padding:0.5rem 1rem 0.5rem 1rem; max-width:100% !important; }}
 h1 {{ background:linear-gradient(135deg,{ACCENT},{ACCENT2}); -webkit-background-clip:text;
-       -webkit-text-fill-color:transparent; font-weight:700; font-size:2rem; margin-bottom:0; }}
-.stTabs [data-baseweb="tab-list"] {{ background:{CARD_BG}; border-radius:12px; padding:4px; border:1px solid #2D3748; }}
-.stTabs [data-baseweb="tab"] {{ color:#94A3B8; font-weight:500; border-radius:8px; padding:8px 20px; }}
+       -webkit-text-fill-color:transparent; font-weight:700; font-size:1.4rem; margin-bottom:0; }}
+.stTabs [data-baseweb="tab-list"] {{ background:{CARD_BG}; border-radius:8px; padding:2px; border:1px solid #2D3748; }}
+.stTabs [data-baseweb="tab"] {{ color:#94A3B8; font-weight:500; border-radius:6px; padding:4px 12px; font-size:0.8rem; }}
 .stTabs [aria-selected="true"] {{ background:{ACCENT}!important; color:#fff!important; }}
 div[data-testid="metric-container"] {{ background:{CARD_BG}; border:1px solid #2D3748;
-    border-radius:12px; padding:16px; }}
-div[data-testid="metric-container"] label {{ color:#94A3B8; font-size:.75rem; text-transform:uppercase; letter-spacing:.08em; }}
-div[data-testid="metric-container"] [data-testid="stMetricValue"] {{ color:#E2E8F0; font-weight:700; font-size:1.6rem; }}
+    border-radius:8px; padding:8px; }}
+div[data-testid="metric-container"] label {{ color:#94A3B8; font-size:.65rem; text-transform:uppercase; letter-spacing:.05em; }}
+div[data-testid="metric-container"] [data-testid="stMetricValue"] {{ color:#E2E8F0; font-weight:700; font-size:1.1rem; }}
 .stButton>button {{ background:linear-gradient(135deg,{ACCENT},{ACCENT2}); color:#fff;
-    border:none; border-radius:8px; font-weight:600; padding:.5rem 1.5rem;
+    border:none; border-radius:6px; font-weight:600; padding:.3rem 1rem; font-size:0.85rem;
     transition:opacity .2s; }}
 .stButton>button:hover {{ opacity:.85; }}
 .stTextInput>div>div>input {{ background:#2D3748; border:1px solid #4A5568;
@@ -73,7 +73,7 @@ def draw_drone(ax, dr, dc):
     ax.add_patch(patches.Circle((x,y),.055,color='#EF4444',zorder=9))
 
 def draw_grid(grid, path=None, old_path=None, disruption=None, drone_pos=None, mode="zones"):
-    fig, ax = plt.subplots(figsize=(7,7))
+    fig, ax = plt.subplots(figsize=(5,5))
     fig.patch.set_facecolor("#0F1117")
     ax.set_facecolor("#0F1117")
     ax.set_xlim(0,10); ax.set_ylim(0,10)
@@ -169,8 +169,7 @@ def main():
     st.markdown(CSS, unsafe_allow_html=True)
 
     st.markdown("# 🚁 AeroNet Lite")
-    st.markdown("<p style='color:#64748B;margin-top:-.5rem;'>Autonomous Drone Delivery Simulation · AI Module SP2026</p>", unsafe_allow_html=True)
-    st.markdown("---")
+    st.markdown("<p style='color:#64748B;margin-top:-.8rem;margin-bottom:.3rem;font-size:0.8rem;'>Autonomous Drone Delivery Simulation · AI Module SP2026</p>", unsafe_allow_html=True)
 
     # ── Sidebar ──────────────────────────────────────────────────
     with st.sidebar:
@@ -222,7 +221,6 @@ def main():
     k3.metric("Hospitals", hosp_count)
     k4.metric("No-Fly Zones", nf_count)
     k5.metric("CSP Violations", rule_errors, delta=f"{rule_errors} rules failed" if rule_errors else "All passed", delta_color="inverse")
-    st.markdown("---")
 
     # ── Tabs ─────────────────────────────────────────────────────
     t1,t2,t3,t4,t5 = st.tabs(["🗺️ Flight Planner","🔍 Layout Validator","🧬 Fleet Selector","📈 ML Forecast","⚠️ Anomaly Detector"])
@@ -268,9 +266,14 @@ def main():
             if 'frames' in st.session_state and st.session_state['frames']:
                 for frame in st.session_state['frames']:
                     m=frame['msg']
-                    if "💥" in m or "ALERT" in m: status_box.warning(m)
-                    elif "🎉" in m: status_box.success(m)
-                    else: status_box.info(m)
+                    if "💥" in m:
+                        status_box.error(f"🚨 EMERGENCY — {m}  \n**A\\* Replanning route in real-time...**")
+                    elif "🎉" in m:
+                        status_box.success(f"✅ MISSION COMPLETE — Drone safely delivered despite disruption!")
+                    elif "rerouted" in m.lower():
+                        status_box.warning(f"⚠️ Rerouting... {m}")
+                    else:
+                        status_box.info(m)
                     mode = "demand" if map_mode=="Demand Heatmap" else "zones"
                     fig=draw_grid(grid,path=frame['path'],old_path=frame['old_path'],
                         disruption=frame['disruption'],drone_pos=frame['pos'],mode=mode)
@@ -389,48 +392,89 @@ def main():
     # ── TAB 5: Anomaly Detector ──────────────────────────────────
     with t5:
         st.markdown("#### Anomaly Detection — Random Forest Classifier")
-        st.markdown("Trained on **2,000 synthetic drone telemetry samples** (15% anomaly rate).")
+        st.markdown("Trained on **2,000 synthetic telemetry samples** · Features: battery drop, speed, route deviation · 15% anomaly rate")
+
         run_cls=st.button("⚠️ Train Classifier", use_container_width=False)
         if run_cls:
             st.session_state.detector = AnomalyDetector()
-            with st.spinner("Training classifier on synthetic telemetry..."):
+            with st.spinner("Training Random Forest Classifier on synthetic telemetry..."):
                 st.session_state.cls_result, st.session_state.cls_out = run_capture(st.session_state.detector.run)
 
         if 'detector' in st.session_state:
             acc, cm = st.session_state.cls_result
-            c1,c2,c3=st.columns(3)
-            c1.metric("Model","Random Forest")
-            c2.metric("Accuracy",f"{acc*100:.2f}%")
-            c3.metric("Anomaly Rate","~15%")
 
-            fig,ax=plt.subplots(figsize=(4,3))
-            fig.patch.set_facecolor(CARD_BG)
-            ax.set_facecolor(CARD_BG)
-            ax.imshow(cm,cmap='Blues')
-            ax.set_xticks([0,1]); ax.set_yticks([0,1])
-            ax.set_xticklabels(["Normal","Anomaly"],color="#CBD5E1")
-            ax.set_yticklabels(["Normal","Anomaly"],color="#CBD5E1")
-            ax.set_title("Confusion Matrix",color="#E2E8F0",fontweight='bold')
-            for i in range(2):
-                for j in range(2):
-                    ax.text(j,i,cm[i,j],ha='center',va='center',
-                            color='white' if cm[i,j]>cm.max()/2 else '#1E293B',fontweight='bold',fontsize=14)
-            plt.tight_layout()
-            st.pyplot(fig)
+            # ── Metrics row ──────────────────────────────────────
+            m1,m2,m3,m4 = st.columns(4)
+            m1.metric("Model", "Random Forest")
+            m2.metric("Accuracy", f"{acc*100:.2f}%")
+            m3.metric("Samples", "2,000")
+            m4.metric("Anomaly Rate", "~15%")
 
-            st.markdown("---")
-            st.markdown("**🔬 Live Test: Classify Telemetry Reading**")
-            sc1,sc2,sc3=st.columns(3)
-            batt = sc1.slider("Battery Drop (%)",0.0,35.0,5.0,.5)
-            spd  = sc2.slider("Speed (m/s)",0.0,30.0,15.0,.5)
-            dev  = sc3.slider("Route Deviation (m)",0.0,100.0,2.0,1.0)
-            sample=pd.DataFrame([[batt,spd,dev]],columns=['battery_drop','speed','route_deviation'])
-            pred=st.session_state.detector.model.predict(sample)[0]
-            prob=st.session_state.detector.model.predict_proba(sample)[0]
-            if pred==1:
-                st.error(f"🚨 **ANOMALY DETECTED** — Confidence: {prob[1]*100:.1f}%")
-            else:
-                st.success(f"✅ **Normal Flight** — Confidence: {prob[0]*100:.1f}%")
+            # ── Side-by-side: Confusion Matrix | Live Tester ─────
+            left, right = st.columns([1, 1])
+
+            with left:
+                st.markdown("**Confusion Matrix**")
+                fig, ax = plt.subplots(figsize=(3, 2.5))
+                fig.patch.set_facecolor(CARD_BG)
+                ax.set_facecolor(CARD_BG)
+                ax.imshow(cm, cmap='Blues')
+                ax.set_xticks([0,1]); ax.set_yticks([0,1])
+                ax.set_xticklabels(["Normal","Anomaly"], color="#CBD5E1", fontsize=9)
+                ax.set_yticklabels(["Normal","Anomaly"], color="#CBD5E1", fontsize=9)
+                ax.set_xlabel("Predicted", color="#94A3B8", fontsize=8)
+                ax.set_ylabel("Actual", color="#94A3B8", fontsize=8)
+                ax.set_title(f"Classifier Accuracy: {acc*100:.1f}%", color="#E2E8F0", fontweight='bold', fontsize=9)
+                for i in range(2):
+                    for j in range(2):
+                        ax.text(j, i, cm[i,j], ha='center', va='center',
+                                color='white' if cm[i,j] > cm.max()/2 else '#1E293B',
+                                fontweight='bold', fontsize=13)
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close(fig)
+
+                # Feature importance bar
+                st.markdown("**Feature Importance**")
+                feats = ['battery_drop','speed','route_deviation']
+                imps  = st.session_state.detector.model.feature_importances_
+                fig2, ax2 = plt.subplots(figsize=(3, 1.5))
+                fig2.patch.set_facecolor(CARD_BG)
+                ax2.set_facecolor(CARD_BG)
+                colors = [DANGER, ACCENT, SUCCESS]
+                ax2.barh(feats, imps, color=colors)
+                ax2.tick_params(colors="#CBD5E1", labelsize=8)
+                ax2.set_xlabel("Importance", color="#94A3B8", fontsize=7)
+                ax2.spines[:].set_color("#2D3748")
+                plt.tight_layout()
+                st.pyplot(fig2)
+                plt.close(fig2)
+
+            with right:
+                st.markdown("**🔬 Live Telemetry Classifier**")
+                batt = st.slider("🔋 Battery Drop (%)", 0.0, 35.0, 5.0, 0.5)
+                spd  = st.slider("💨 Speed (m/s)",       0.0, 30.0, 15.0, 0.5)
+                dev  = st.slider("📍 Route Deviation (m)", 0.0, 100.0, 2.0, 1.0)
+
+                sample = pd.DataFrame([[batt,spd,dev]], columns=['battery_drop','speed','route_deviation'])
+                pred   = st.session_state.detector.model.predict(sample)[0]
+                prob   = st.session_state.detector.model.predict_proba(sample)[0]
+
+                st.markdown("---")
+                if pred == 1:
+                    conf = prob[1]*100
+                    st.error(f"🚨 **ANOMALY DETECTED**")
+                    st.markdown(f"<h2 style='color:#EF4444;text-align:center'>{conf:.1f}% Confidence</h2>", unsafe_allow_html=True)
+                    st.markdown("**Likely cause:**")
+                    if batt > 12:  st.warning(f"🔋 Battery drop ({batt}%) exceeds safe threshold (12%)")
+                    if dev  > 15:  st.warning(f"📍 Route deviation ({dev}m) exceeds safe threshold (15m)")
+                    if batt <= 12 and dev <= 15:
+                        st.warning("⚠️ Borderline readings — model flagged as anomaly based on combined feature pattern.")
+                else:
+                    conf = prob[0]*100
+                    st.success(f"✅ **Normal Flight**")
+                    st.markdown(f"<h2 style='color:#22C55E;text-align:center'>{conf:.1f}% Confidence</h2>", unsafe_allow_html=True)
+                    st.info("All telemetry readings within safe operating parameters.")
         else:
             st.info("Click **Train Classifier** to train on synthetic telemetry data.")
 

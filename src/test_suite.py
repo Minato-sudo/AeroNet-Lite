@@ -93,7 +93,7 @@ def run_tests():
     # Test 3.2: Impossible Budget
     fs_poor = FleetSelector(total_demand=500, budget=100) # Can't even afford 1 drone
     fleet_poor, score_poor = fs_poor.run_genetic_algorithm(generations=5, pop_size=10)
-    cost = fleet_poor[0]*1000 + fleet_poor[1]*2500
+    cost = fleet_poor[0]*1000 + fleet_poor[1]*1800  # Light=$1000, Heavy=$1800
     assert_test("Refuse to exceed budget even when demand is impossibly high", cost <= 100)
     
     print(f"\n============================================================")
