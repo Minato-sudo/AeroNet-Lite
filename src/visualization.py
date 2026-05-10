@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors
 import numpy as np
-import sys, os, time, io, contextlib
+import sys, os, time, io, contextlib, random
 import pandas as pd
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -121,42 +121,78 @@ def draw_grid(grid, path=None, old_path=None, disruption=None, drone_pos=None, m
     ax.axis('off')
     return fig
 
-def generate_frames(grid, start, goal, simulate_disruption):
-    frames=[]; path,cost,msg = astar(start,goal,grid)
-    if not path: return None,msg
-    fpf=8
-    if simulate_disruption and len(path)>3:
-        didx=len(path)//2; dcell=path[didx]; old=list(path)
-        for i in range(didx-1):
-            r1,c1=path[i]; r2,c2=path[i+1]
-            for s in range(fpf):
-                frames.append({'pos':(r1+(r2-r1)*s/fpf,c1+(c2-c1)*s/fpf),
-                    'path':path[:didx],'old_path':None,'disruption':None,
-                    'msg':"🚁 Flight initiated — navigating to target..."})
-        grid[dcell[0]][dcell[1]].no_fly=True
-        nloc=path[didx-1]; np2,_,nm=astar(nloc,goal,grid)
-        grid[dcell[0]][dcell[1]].no_fly=False
-        if np2:
-            merged=path[:didx]+np2[1:]
-            for i in range(didx-1,len(merged)-1):
-                r1,c1=merged[i]; r2,c2=merged[i+1]
+def generate_frames(grid, start, segments, simulate_disruption):
+    frames = []
+    fpf = 6
+    
+    # Pre-calculate the full path to know total length and pick a random disruption point
+    full_path = [start]
+    for target, _, _ in segments:
+        leg, _, _ = astar(full_path[-1], target, grid)
+        if not leg: return None, "Initial routing failed."
+        full_path.extend(leg[1:])
+        
+    dcell = None
+    didx = -1
+    if simulate_disruption and len(full_path) > 4:
+        didx = random.randint(2, len(full_path)-3)
+        dcell = full_path[didx]
+        
+    old_full_path = list(full_path) if simulate_disruption else None
+    
+    current_loc = start
+    step_counter = 0
+    total_cost = 0
+    
+    for leg_idx, (target, flying_msg, milestone_msg) in enumerate(segments):
+        path, cost, _ = astar(current_loc, target, grid)
+        if not path: return None, f"Routing failed on leg {leg_idx+1}"
+        total_cost += cost
+        
+        path_idx = 0
+        while path_idx < len(path)-1:
+            r1, c1 = path[path_idx]
+            
+            # Check for disruption NEXT step
+            if simulate_disruption and step_counter + 1 == didx:
+                grid[dcell[0]][dcell[1]].no_fly = True
+                new_path, new_cost, _ = astar((r1, c1), target, grid)
+                grid[dcell[0]][dcell[1]].no_fly = False
+                
+                if not new_path: return None, "Reroute failed — drone trapped."
+                
+                # We need to rebuild old_full_path and full_path for drawing purposes
+                # We can just skip drawing the full future path after reroute to keep it simple,
+                # but let's just pass `new_path` for the visual.
+                
+                path = new_path
+                path_idx = 0
+                r2, c2 = path[1]
+                
                 for s in range(fpf):
-                    frames.append({'pos':(r1+(r2-r1)*s/fpf,c1+(c2-c1)*s/fpf),
-                        'path':merged,'old_path':old,'disruption':dcell,
+                    frames.append({'pos':(r1+(r2-r1)*s/fpf, c1+(c2-c1)*s/fpf),
+                        'path':path, 'old_path':old_full_path, 'disruption':dcell,
                         'msg':f"💥 No-fly at {dcell}! A* rerouted successfully."})
-            frames.append({'pos':merged[-1],'path':merged,'old_path':old,
-                'disruption':dcell,'msg':"🎉 Delivery complete (rerouted)!"})
-            return frames,"Success"
-        return None,"Reroute failed — drone trapped."
-    for i in range(len(path)-1):
-        r1,c1=path[i]; r2,c2=path[i+1]
-        for s in range(fpf):
-            frames.append({'pos':(r1+(r2-r1)*s/fpf,c1+(c2-c1)*s/fpf),
-                'path':path,'old_path':None,'disruption':None,
-                'msg':"🚁 Navigating smoothly..."})
-    frames.append({'pos':path[-1],'path':path,'old_path':None,
-        'disruption':None,'msg':"🎉 Delivery complete!"})
-    return frames,"Success"
+                
+                path_idx += 1
+                step_counter += 1
+                current_loc = (r2, c2)
+                continue
+                
+            r2, c2 = path[path_idx+1]
+            for s in range(fpf):
+                frames.append({'pos':(r1+(r2-r1)*s/fpf, c1+(c2-c1)*s/fpf),
+                    'path':path, 'old_path':old_full_path, 'disruption':dcell if step_counter >= didx else None,
+                    'msg': flying_msg})
+                    
+            path_idx += 1
+            step_counter += 1
+            current_loc = (r2, c2)
+            
+        frames.append({'pos':current_loc, 'path':path, 'old_path':old_full_path,
+            'disruption':dcell if step_counter >= didx else None, 'msg':milestone_msg})
+            
+    return frames, "Success"
 
 def run_capture(fn):
     buf=io.StringIO()
@@ -263,76 +299,24 @@ def main():
 
             if calc_btn:
                 if use_pickup:
-                    # Find nearest hub to dropoff for smart return
                     hubs_in_grid = [(r,c) for r in range(10) for c in range(10) if grid[r][c].is_hub]
-                    if hubs_in_grid:
-                        nearest_hub = min(hubs_in_grid,
-                            key=lambda h: abs(h[0]-gr)+abs(h[1]-gc))
-                    else:
-                        nearest_hub = (sr,sc)  # fallback to origin
-
-                    leg1,c1_,m1 = astar((sr,sc),(pr,pc),grid)   # Hub → Pickup
-                    leg2,c2_,m2 = astar((pr,pc),(gr,gc),grid)   # Pickup → Dropoff
-                    leg3,c3_,m3 = astar((gr,gc),nearest_hub,grid) # Dropoff → Nearest Hub
-
-                    if leg1 and leg2 and leg3:
-                        full_path = leg1 + leg2[1:] + leg3[1:]
-                        total_cost = c1_+c2_+c3_
-                        frames=[]
-                        fpf=6
-
-                        # Leg 1: Hub → Pickup
-                        for i in range(len(leg1)-1):
-                            r1,c1_v=leg1[i]; r2,c2_v=leg1[i+1]
-                            for s in range(fpf):
-                                frames.append({'pos':(r1+(r2-r1)*s/fpf, c1_v+(c2_v-c1_v)*s/fpf),
-                                    'path':full_path,'old_path':None,'disruption':None,
-                                    'msg':"🚁 Leg 1: Flying to Pickup location..."})
-
-                        # Milestone: ORDER PICKED UP
-                        frames.append({'pos':(pr,pc),'path':full_path,'old_path':None,
-                            'disruption':None,'msg':"📦 ORDER PICKED UP at ({},{})!".format(pr,pc)})
-
-                        # Leg 2: Pickup → Dropoff
-                        for i in range(len(leg2)-1):
-                            r1,c1_v=leg2[i]; r2,c2_v=leg2[i+1]
-                            for s in range(fpf):
-                                frames.append({'pos':(r1+(r2-r1)*s/fpf, c1_v+(c2_v-c1_v)*s/fpf),
-                                    'path':full_path,'old_path':None,'disruption':None,
-                                    'msg':"📦 Leg 2: En route to Drop-off..."})
-
-                        # Milestone: ORDER DELIVERED
-                        frames.append({'pos':(gr,gc),'path':full_path,'old_path':None,
-                            'disruption':None,'msg':"✅ ORDER DELIVERED at ({},{})! Returning to nearest hub {}...".format(gr,gc,nearest_hub)})
-
-                        # Leg 3: Dropoff → Nearest Hub
-                        for i in range(len(leg3)-1):
-                            r1,c1_v=leg3[i]; r2,c2_v=leg3[i+1]
-                            for s in range(fpf):
-                                frames.append({'pos':(r1+(r2-r1)*s/fpf, c1_v+(c2_v-c1_v)*s/fpf),
-                                    'path':full_path,'old_path':None,'disruption':None,
-                                    'msg':"🏠 Leg 3: Returning to nearest hub {}...".format(nearest_hub)})
-
-                        # Final milestone
-                        frames.append({'pos':nearest_hub,'path':full_path,'old_path':None,
-                            'disruption':None,
-                            'msg':"🎉 Mission Complete! Hub→Pickup→Dropoff→Nearest Hub | Total cost: {:.1f} moves".format(total_cost)})
-
-                        st.session_state['frames']=frames
-                        st.session_state['pickup_info']={'pickup':(pr,pc),'dropoff':(gr,gc),'hub':nearest_hub,'cost':total_cost}
-                        status_box.info(f"Route: ({sr},{sc}) → Pickup({pr},{pc}) → Dropoff({gr},{gc}) → Hub{nearest_hub} | Cost: {total_cost:.1f}")
-                    else:
-                        failed=[msg for msg,leg in [(m1,leg1),(m2,leg2),(m3,leg3)] if not leg]
-                        status_box.error(f"❌ Route failed: {', '.join(failed)}")
-                        st.session_state.pop('frames',None)
+                    nearest_hub = min(hubs_in_grid, key=lambda h: abs(h[0]-gr)+abs(h[1]-gc)) if hubs_in_grid else (sr,sc)
+                    
+                    segments = [
+                        ((pr,pc), "🚁 Leg 1: Flying to Pickup location...", f"📦 ORDER PICKED UP at ({pr},{pc})!"),
+                        ((gr,gc), "📦 Leg 2: En route to Drop-off...", f"✅ ORDER DELIVERED at ({gr},{gc})! Returning to nearest hub {nearest_hub}..."),
+                        (nearest_hub, f"🏠 Leg 3: Returning to nearest hub {nearest_hub}...", f"🎉 Mission Complete! Hub→Pickup→Dropoff→Nearest Hub")
+                    ]
                 else:
-                    # Simple A→B mode
-                    frames,msg = generate_frames(grid,(sr,sc),(gr,gc),trigger_dis)
-                    if frames:
-                        st.session_state['frames']=frames
-                    else:
-                        st.session_state.pop('frames',None)
-                        status_box.error(f"❌ Routing failed: {msg}")
+                    segments = [((gr,gc), "🚁 Navigating smoothly...", "🎉 Delivery complete!")]
+                    
+                frames, msg = generate_frames(grid, (sr,sc), segments, trigger_dis)
+                if frames:
+                    st.session_state['frames'] = frames
+                    status_box.info(f"Route simulated. Check animation below.")
+                else:
+                    st.session_state.pop('frames', None)
+                    status_box.error(f"❌ {msg}")
 
             if 'frames' in st.session_state and st.session_state['frames']:
                 for frame in st.session_state['frames']:
